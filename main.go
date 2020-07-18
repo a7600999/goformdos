@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -28,6 +29,10 @@ var (
 		"t",
 		0,
 		"Define dos duration (seconds)")
+	flagLog = flag.String(
+		"l",
+		"",
+		"logfile")
 )
 
 func appendFilelinesToSlice(filename string, ss *[]string, sync chan<- string) {
@@ -64,11 +69,34 @@ func validateURL(s string, sync chan<- int8) {
 	sync <- 0
 }
 
+func isPath(filepath string) (bool, error) {
+	_, err := os.Stat(filepath)
+	if err != nil {
+		return false, err
+	}
+	return true, err
+}
+
 func init() {
+	fmt.Print("\033[H\033[2J") // clear terminal
 	flag.Parse()
 	if *flagFile == "" || *flagURL == "" || *flagThreads <= 0 || *flagTime <= 0 {
-		fmt.Println("please define arguments or use -h for help")
-		os.Exit(1)
+		log.Fatalln("please define arguments or use -h for help")
+	}
+	if *flagLog != "" {
+		b, _ := isPath(*flagLog)
+		if b {
+			file, err := os.OpenFile(*flagLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			defer file.Close()
+
+			log.SetOutput(file)
+		} else {
+			log.Fatalf("%s path not exist - unable to open or create file", *flagLog)
+		}
 	}
 }
 
@@ -85,12 +113,10 @@ func main() {
 	appenderr := <-appendsync
 	urlerr := <-urlsync
 	if appenderr != "" {
-		fmt.Println(appenderr)
-		os.Exit(1)
+		log.Fatalln(appenderr)
 	}
 	if urlerr < 0 {
-		fmt.Printf("url is invalid: %s\n", *flagURL)
-		os.Exit(1)
+		log.Fatalf("url is invalid: %s\n", *flagURL)
 	}
 
 	var info dos.TargetInf
@@ -101,7 +127,6 @@ func main() {
 
 	err := dos.Run(*flagThreads, *flagTime, info)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		log.Fatalln(err)
 	}
 }

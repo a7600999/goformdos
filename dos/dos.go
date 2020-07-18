@@ -47,18 +47,21 @@ func (inf *TargetInf) Make() url.Values {
 }
 
 func makeRequest(ch chan<- struct{}) {
+	defer close(ch)
+
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	resp, err := http.PostForm(infoIntern.webaddress, infoIntern.formnames)
 	if err != nil {
 		fmt.Println(err)
 	}
+
+	defer resp.Body.Close()
+
 	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
 		fmt.Printf("%10d | HTTP Status is in the 2xx range : %s\n", r.Uint32(), infoIntern.webaddress)
 	} else {
 		fmt.Printf("%10d | Argh! Broken : %s\n", r.Uint32(), infoIntern.webaddress)
 	}
-	defer resp.Body.Close()
-	defer close(ch)
 }
 
 func runner() {
@@ -87,7 +90,7 @@ func start(n int) {
 
 func quit() {
 	close(channelStruct.quitter)
-	time.Sleep(10 * time.Second)
+	time.Sleep(5 * time.Second)
 	status := 0
 	channelStruct.sync <- status
 }
@@ -102,7 +105,6 @@ func buildingDataAndCh(info TargetInf) {
 
 // Run function - returns error or nil
 func Run(threads int, timeInSeconds int, info TargetInf) (err error) {
-
 	var status int            // Status variable for error management
 	var runTime time.Duration // variable for runtime management
 
