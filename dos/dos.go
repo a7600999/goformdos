@@ -46,9 +46,7 @@ func (inf *TargetInf) Make() url.Values {
 	return inf.formnames
 }
 
-func makeRequest(ch chan<- struct{}) {
-	defer close(ch)
-
+func makeRequest(sync chan<- uint8) {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	resp, err := http.PostForm(infoIntern.webaddress, infoIntern.formnames)
 	if err != nil {
@@ -62,18 +60,20 @@ func makeRequest(ch chan<- struct{}) {
 	} else {
 		fmt.Printf("%10d | Argh! Broken : %s\n", r.Uint32(), infoIntern.webaddress)
 	}
+
+	sync <- 0
 }
 
 func runner() {
 	<-channelStruct.starter // Starting routine on receive
+	sync := make(chan uint8)
 	for {
 		select {
 		case <-channelStruct.quitter: // Quit routine on receive
 			break
 		default:
-			temp := make(chan struct{})
-			go makeRequest(temp)
-			<-temp
+			go makeRequest(sync)
+			_ = <-sync
 		}
 	}
 }

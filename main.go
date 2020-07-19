@@ -35,7 +35,11 @@ var (
 		"logfile")
 )
 
-func appendFilelinesToSlice(filename string, ss *[]string, sync chan<- string) {
+var (
+	info dos.TargetInf
+)
+
+func appendFormToStruct(filename string, sync chan<- string) {
 	f, err := os.Open(filename)
 	if err != nil {
 		sync <- fmt.Sprintf("error opening file: %s\n", filename)
@@ -48,10 +52,13 @@ func appendFilelinesToSlice(filename string, ss *[]string, sync chan<- string) {
 	}()
 
 	s := bufio.NewScanner(f)
-	var stripped string
+	var stripped []string
 	for s.Scan() {
-		stripped = strings.Trim(s.Text(), " \r\n") // Strip whitespace, newline and carriage return from string
-		*ss = append(*ss, stripped)
+		stripped = strings.Split(s.Text(), " ")          // split line on whitespace
+		stripped[0] = strings.Trim(stripped[0], " \r\n") // strip whitespace, carriage return and newline
+		stripped[1] = strings.Trim(stripped[1], " \r\n")
+		info.AddForm(stripped[0], stripped[1]) // add form and form value to struct
+		stripped = nil                         // clear the slice
 	}
 
 	if err = s.Err(); err != nil {
@@ -102,12 +109,10 @@ func init() {
 
 func main() {
 
-	var formSlice []string
-
 	urlsync := make(chan int8)
 	appendsync := make(chan string)
 
-	go appendFilelinesToSlice(*flagFile, &formSlice, appendsync)
+	go appendFormToStruct(*flagFile, appendsync)
 	go validateURL(*flagURL, urlsync)
 
 	appenderr := <-appendsync
@@ -119,11 +124,7 @@ func main() {
 		log.Fatalf("url is invalid: %s\n", *flagURL)
 	}
 
-	var info dos.TargetInf
 	info.AddWebaddress(*flagURL)
-	for _, element := range formSlice {
-		info.AddForm(element, "1234567890AaBb!?-")
-	}
 
 	err := dos.Run(*flagThreads, *flagTime, info)
 	if err != nil {
