@@ -1,0 +1,11 @@
+vb_login_username:admin
+vb_login_password:238hhd78a2z
+x:1
+y:1
+s:1
+do:login
+forceredirect:1
+vb_login_md5password:""
+vb_login_md5password_utf:""
+cookieuser:1
+url:""
