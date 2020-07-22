@@ -4,7 +4,6 @@ package dos
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
@@ -30,7 +29,6 @@ var (
 	channelStruct ch
 	infoIntern    TargetInf
 	hc            http.Client
-	req           *http.Request
 )
 
 // AddWebaddress - Add webaddress to TargetInf.webaddress
@@ -72,16 +70,16 @@ func (inf *TargetInf) MakeHeaders() map[string]string {
 }
 
 func makeRequest(sync chan<- uint8) {
+
+	req := buildRequest() // Building our request
+
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	resp, err := hc.Do(req)
 	if err != nil {
 		log.Printf("error do post request: %s\n", err)
 	}
 
-	defer func() {
-		resp.Body.Close()                                                             // always close response.Body
-		req.Body = ioutil.NopCloser(strings.NewReader(infoIntern.formnames.Encode())) // reset request.Body - initalize again with TargetInf.formnames
-	}()
+	defer resp.Body.Close() // Close response body at end of function
 
 	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
 		log.Printf("%10d | HTTP Status is in the 2xx range : %s\n", r.Uint32(), infoIntern.webaddress)
@@ -123,6 +121,22 @@ func quit() {
 	channelStruct.sync <- status
 }
 
+func buildRequest() *http.Request {
+	// Building initial request and add values to request
+	req, err := http.NewRequest("POST", infoIntern.webaddress, strings.NewReader(infoIntern.formnames.Encode()))
+	if err != nil {
+		log.Println("error building request")
+	}
+	req.PostForm = infoIntern.formnames // add url.Values tu request
+
+	// add headers to request
+	for key, value := range infoIntern.headers {
+		req.Header.Set(key, value)
+	}
+
+	return req
+}
+
 func buildingDataAndCh(info TargetInf) {
 	channelStruct.starter = make(chan struct{})
 	channelStruct.quitter = make(chan struct{})
@@ -131,20 +145,6 @@ func buildingDataAndCh(info TargetInf) {
 	infoIntern = info // Build global struct
 
 	hc = http.Client{} // initialize http.Client struct
-
-	// Building initial request and add values to request
-	func() {
-		var err error
-		if req, err = http.NewRequest("POST", infoIntern.webaddress, strings.NewReader(infoIntern.formnames.Encode())); err != nil {
-			log.Fatalln("error building request")
-		}
-		req.PostForm = infoIntern.formnames // add url.Values tu request
-
-		// add headers to request
-		for key, value := range infoIntern.headers {
-			req.Header.Set(key, value)
-		}
-	}()
 }
 
 // Run function - returns error or nil

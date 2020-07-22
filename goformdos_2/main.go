@@ -3,15 +3,14 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"net/url"
 	"os"
-	"strings"
 
-	"github.com/pierelucas/goformdos2/dos"
+	"github.com/pierelucas/goformdos/goformdos2/configparser"
+	"github.com/pierelucas/goformdos/goformdos2/dos"
 )
 
 var (
@@ -44,41 +43,6 @@ var (
 var (
 	info dos.TargetInf
 )
-
-func appendFileToStruct(mode string, filename string, sync chan<- string) {
-	f, err := os.Open(filename)
-	if err != nil {
-		sync <- fmt.Sprintf("error opening file: %s\n", filename)
-	}
-
-	defer func() {
-		if err = f.Close(); err != nil {
-			sync <- fmt.Sprintf("error closing file: %s\n", filename)
-		}
-	}()
-
-	s := bufio.NewScanner(f)
-	var stripped []string
-	for s.Scan() {
-		stripped = strings.Split(s.Text(), ":")         // split line on :
-		stripped[0] = strings.Trim(stripped[0], "\r\n") // strip carriage return and newline
-		stripped[1] = strings.Trim(stripped[1], "\r\n")
-		if mode == "FORMS" {
-			info.AddForm(stripped[0], stripped[1]) // add form and form value to struct
-		} else if mode == "HEADERS" {
-			info.AddHeader(stripped[0], stripped[1]) // add header and header value to struct
-		} else {
-			log.Fatalln("error in func appendFileToStruct - wrong mode! [FORMS / HEADERS]")
-		}
-		stripped = nil // clear the slice
-	}
-
-	if err = s.Err(); err != nil {
-		sync <- fmt.Sprintf("%s\n", err)
-	}
-
-	sync <- ""
-}
 
 func validateURL(s string, sync chan<- struct{}) {
 	_, err := url.ParseRequestURI(s)
@@ -119,29 +83,50 @@ func init() {
 	}
 }
 
+func appendToStruct(mode string, syncChannel chan<- string, input map[string]string) {
+	for k, v := range input {
+		if mode == "FORMS" {
+			info.AddForm(k, v)
+		} else if mode == "HEADERS" {
+			info.AddHeader(k, v)
+		} else {
+			log.Fatalln("error in func appendToStruct - wrong mode! [FORMS / HEADERS]")
+		}
+	}
+
+	syncChannel <- ""
+}
+
 func main() {
 
 	urlsync := make(chan struct{})
-	appendsync := make(chan string)
+	sync := make(chan string)
 
-	var appenderr string
+	var parseerr string
+	var forms = make(map[string]string)
+	var headers = make(map[string]string)
 
-	go appendFileToStruct("FORMS", *flagForms, appendsync)
-	go appendFileToStruct("HEADERS", *flagHeaders, appendsync)
 	go validateURL(*flagURL, urlsync)
+	go configparser.Parse(&forms, *flagForms, sync)
+	go configparser.Parse(&headers, *flagHeaders, sync)
 
-	<-urlsync                // wait for validateURL()
-	appenderr = <-appendsync // wait for file append
-	if appenderr != "" {
-		log.Fatalln(appenderr)
+	<-urlsync         // wait for validateURL()
+	parseerr = <-sync // wait for file append
+	if parseerr != "" {
+		log.Fatalln(parseerr)
 	}
 
-	appenderr = <-appendsync // wait for file append
-	if appenderr != "" {
-		log.Fatalln(appenderr)
+	parseerr = <-sync // wait for file append
+	if parseerr != "" {
+		log.Fatalln(parseerr)
 	}
 
 	info.AddWebaddress(*flagURL) // add url to struct
+
+	go appendToStruct("FORMS", sync, forms)     // Intialize forms
+	go appendToStruct("HEADERS", sync, headers) // Intialize headers
+	<-sync                                      // wait for appendToStruct
+	<-sync                                      // ""
 
 	err := dos.Run(*flagThreads, *flagTime, info)
 	if err != nil {
