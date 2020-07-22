@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/pierelucas/goformdos/goformdos2/configparser"
 	"github.com/pierelucas/goformdos/goformdos2/dos"
@@ -22,6 +23,10 @@ var (
 		"h",
 		"",
 		"File containing headers")
+	flagAuth = flag.String(
+		"a",
+		"",
+		"Basic HTTP Authentication")
 	flagURL = flag.String(
 		"u",
 		"",
@@ -63,9 +68,11 @@ func isPath(filepath string) (bool, error) {
 func init() {
 	fmt.Print("\033[H\033[2J") // clear terminal
 	flag.Parse()
+
 	if *flagForms == "" || *flagURL == "" || *flagHeaders == "" || *flagThreads <= 0 || *flagTime <= 0 {
 		log.Fatalln("please define arguments or use -h for help")
 	}
+
 	if *flagLog != "" {
 		b, _ := isPath(*flagLog)
 		if b {
@@ -79,6 +86,15 @@ func init() {
 			log.SetOutput(file)
 		} else {
 			log.Fatalf("%s path not exist - unable to open or create file", *flagLog)
+		}
+	}
+
+	if *flagAuth != "" {
+		if !strings.Contains(*flagAuth, ":") {
+			log.Fatalf("%s is not a valid username:password\n", *flagAuth)
+		} else {
+			tempSlice := strings.Split(*flagAuth, ":")
+			info.AddAuth(tempSlice[0], tempSlice[1])
 		}
 	}
 }

@@ -23,6 +23,8 @@ type TargetInf struct {
 	webaddress string
 	formnames  url.Values
 	headers    map[string]string
+	basicAuth  []string
+	authSet    bool
 }
 
 var (
@@ -53,6 +55,13 @@ func (inf *TargetInf) AddHeader(key string, value string) map[string]string {
 	}
 	inf.headers[key] = value
 	return inf.headers
+}
+
+// AddAuth - Add basic HTTP authentication user and password
+func (inf *TargetInf) AddAuth(user string, password string) []string {
+	inf.basicAuth = append(inf.basicAuth, user, password)
+	inf.authSet = true
+	return inf.basicAuth
 }
 
 // MakeForms - initialize the internal Values struct.
@@ -132,6 +141,11 @@ func buildRequest() *http.Request {
 	// add headers to request
 	for key, value := range infoIntern.headers {
 		req.Header.Set(key, value)
+	}
+
+	// Set the basic http authentication
+	if infoIntern.authSet {
+		req.SetBasicAuth(infoIntern.basicAuth[0], infoIntern.basicAuth[1])
 	}
 
 	return req
