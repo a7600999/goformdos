@@ -2,7 +2,7 @@ package configparser
 
 import (
 	"bufio"
-	"fmt"
+	"log"
 	"os"
 	"strings"
 )
@@ -47,15 +47,15 @@ func AppendFileToStruct(mode string, filename string, sync chan<- string, info d
 // Parse - Parse the Config file to destination map[string]string
 // The config must be in the right format
 // e.g. Host:google.com
-func Parse(dest *map[string]string, filename string, syncChannel chan<- string) {
+func Parse(dest *map[string]string, filename string, done chan<- struct{}) {
 	f, err := os.Open(filename)
 	if err != nil {
-		syncChannel <- fmt.Sprintf("error opening file: %s\n", filename)
+		log.Fatalf("error opening file: %s\n", filename)
 	}
 
 	defer func() {
 		if err = f.Close(); err != nil {
-			syncChannel <- fmt.Sprintf("error closing file: %s\n", filename)
+			log.Fatalf("error closing file: %s\n", filename)
 		}
 	}()
 
@@ -73,8 +73,8 @@ func Parse(dest *map[string]string, filename string, syncChannel chan<- string) 
 	}
 
 	if err = s.Err(); err != nil {
-		syncChannel <- fmt.Sprintf("%s\n", err)
+		log.Fatalf("%s\n", err)
 	}
 
-	syncChannel <- ""
+	done <- struct{}{}
 }

@@ -49,12 +49,13 @@ var (
 	info dos.TargetInf
 )
 
-func validateURL(s string, sync chan<- struct{}) {
+func validateURL(s string, done chan<- struct{}) {
 	_, err := url.ParseRequestURI(s)
 	if err != nil {
 		log.Fatalf("%s is invalid url\n", s)
 	}
-	close(sync)
+
+	done <- struct{}{}
 }
 
 func isPath(filepath string) (bool, error) {
@@ -99,7 +100,7 @@ func init() {
 	}
 }
 
-func appendToStruct(mode string, syncChannel chan<- string, input map[string]string) {
+func appendToStruct(mode string, done chan<- struct{}, input map[string]string) {
 	for k, v := range input {
 		if mode == "FORMS" {
 			info.AddForm(k, v)
@@ -110,41 +111,36 @@ func appendToStruct(mode string, syncChannel chan<- string, input map[string]str
 		}
 	}
 
-	syncChannel <- ""
+	done <- struct{}{}
 }
 
 func main() {
 
-	urlsync := make(chan struct{})
-	sync := make(chan string)
+	var done = make(chan struct{})
 
-	var parseerr string
 	var forms = make(map[string]string)
 	var headers = make(map[string]string)
 
-	go validateURL(*flagURL, urlsync)
-	go configparser.Parse(&forms, *flagForms, sync)
-	go configparser.Parse(&headers, *flagHeaders, sync)
+	go validateURL(*flagURL, done)
+	go configparser.Parse(&forms, *flagForms, done)
+	go configparser.Parse(&headers, *flagHeaders, done)
 
-	<-urlsync         // wait for validateURL()
-	parseerr = <-sync // wait for file append
-	if parseerr != "" {
-		log.Fatalln(parseerr)
-	}
-
-	parseerr = <-sync // wait for file append
-	if parseerr != "" {
-		log.Fatalln(parseerr)
+	// Wait for goroutines to finish task
+	for i := 0; i < 3; i++ {
+		<-done
 	}
 
 	info.AddWebaddress(*flagURL) // add url to struct
 
-	go appendToStruct("FORMS", sync, forms)     // Intialize forms
-	go appendToStruct("HEADERS", sync, headers) // Intialize headers
-	<-sync                                      // wait for appendToStruct
-	<-sync                                      // ""
+	go appendToStruct("FORMS", done, forms)     // Intialize forms
+	go appendToStruct("HEADERS", done, headers) // Intialize headers
 
-	err := dos.Run(*flagThreads, *flagTime, &info)
+	// Wait for goroutines to finish task
+	for i := 0; i < 2; i++ {
+		<-done
+	}
+
+	err := dos.Dos(*flagThreads, *flagTime, &info)
 	if err != nil {
 		log.Fatalln(err)
 	}

