@@ -28,9 +28,11 @@ type TargetInf struct {
 }
 
 var (
-	channelStruct ch
-	infoIntern    TargetInf
-	hc            http.Client
+	channelStruct    ch
+	infoIntern       TargetInf
+	authUser         string
+	authPass         string
+	persistenHeaders http.Header
 )
 
 // AddWebaddress - Add webaddress to TargetInf.webaddress
@@ -78,7 +80,14 @@ func (inf *TargetInf) MakeHeaders() map[string]string {
 	return inf.headers
 }
 
-func makeRequest(sync chan<- uint8) {
+// Copy - Copy the TargetInf Struct
+func (inf *TargetInf) Copy() TargetInf {
+	return *inf
+}
+
+func makeRequest() {
+
+	hc := http.Client{} // Initalize default client
 
 	req := buildRequest() // Building our request
 
@@ -95,20 +104,16 @@ func makeRequest(sync chan<- uint8) {
 	} else {
 		log.Printf("%10d | Argh! Broken : %s\n", r.Uint32(), infoIntern.webaddress)
 	}
-
-	sync <- 0
 }
 
 func runner() {
-	<-channelStruct.starter // Starting routine on receive
-	sync := make(chan uint8)
+	<-channelStruct.starter // Starting routine on close of channel starter
 	for {
 		select {
 		case <-channelStruct.quitter: // Quit routine on receive
 			break
 		default:
-			go makeRequest(sync)
-			_ = <-sync
+			makeRequest()
 		}
 	}
 }
@@ -118,6 +123,8 @@ func start(n int) {
 		log.Printf("Starting routine: %d\n", i)
 		go runner()
 	}
+	log.Println("Building Initial Request")
+	_ = buildRequest() // Building initial request
 	close(channelStruct.starter)
 	status := 0
 	channelStruct.sync <- status
@@ -136,33 +143,41 @@ func buildRequest() *http.Request {
 	if err != nil {
 		log.Println("error building request")
 	}
-	req.PostForm = infoIntern.formnames // add url.Values tu request
 
-	// add headers to request
-	for key, value := range infoIntern.headers {
-		req.Header.Set(key, value)
+	req.PostForm = infoIntern.formnames // add url.Values too request
+
+	// add headers and authorization (if set) to request and make it persistent
+	if persistenHeaders == nil {
+		for key, value := range infoIntern.headers {
+			req.Header.Set(key, value)
+		}
+		if infoIntern.authSet {
+			req.SetBasicAuth(authUser, authPass)
+			tempVal := req.Header.Values("Authorization")[0]
+			req.Header.Set("Authorization", tempVal)
+		}
+		persistenHeaders = req.Header.Clone()
+	} else {
+		req.Header = persistenHeaders
 	}
-
-	// Set the basic http authentication
-	if infoIntern.authSet {
-		req.SetBasicAuth(infoIntern.basicAuth[0], infoIntern.basicAuth[1])
-	}
-
 	return req
 }
 
-func buildingDataAndCh(info TargetInf) {
+func buildingDataAndCh(info *TargetInf) {
 	channelStruct.starter = make(chan struct{})
 	channelStruct.quitter = make(chan struct{})
 	channelStruct.sync = make(chan int)
 
-	infoIntern = info // Build global struct
+	infoIntern = info.Copy() // Build global struct
 
-	hc = http.Client{} // initialize http.Client struct
+	if infoIntern.authSet {
+		authUser = infoIntern.basicAuth[0]
+		authPass = infoIntern.basicAuth[1]
+	}
 }
 
 // Run function - returns error or nil
-func Run(threads int, timeInSeconds int, info TargetInf) (err error) {
+func Run(threads int, timeInSeconds int, info *TargetInf) (err error) {
 	var status int            // Status variable for error management
 	var runTime time.Duration // variable for runtime management
 

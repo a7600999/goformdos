@@ -144,7 +144,7 @@ func main() {
 	<-sync                                      // wait for appendToStruct
 	<-sync                                      // ""
 
-	err := dos.Run(*flagThreads, *flagTime, info)
+	err := dos.Run(*flagThreads, *flagTime, &info)
 	if err != nil {
 		log.Fatalln(err)
 	}
