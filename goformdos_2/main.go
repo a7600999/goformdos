@@ -39,10 +39,10 @@ var (
 		"t",
 		0,
 		"Define dos duration (seconds)")
-	flagLog = flag.String(
-		"l",
+	flagOutput = flag.String(
+		"o",
 		"",
-		"logfile")
+		"output logfile (lot of Foo)")
 )
 
 var (
@@ -74,10 +74,10 @@ func init() {
 		log.Fatalln("please define arguments or use -h for help")
 	}
 
-	if *flagLog != "" {
-		b, _ := isPath(*flagLog)
+	if *flagOutput != "" {
+		b, _ := isPath(*flagOutput)
 		if b {
-			file, err := os.OpenFile(*flagLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+			file, err := os.OpenFile(*flagOutput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -86,7 +86,7 @@ func init() {
 
 			log.SetOutput(file)
 		} else {
-			log.Fatalf("%s path not exist - unable to open or create file", *flagLog)
+			log.Fatalf("%s path not exist - unable to open or create file", *flagOutput)
 		}
 	}
 

@@ -91,7 +91,7 @@ func makeRequest(done chan<- struct{}) {
 	r := runtime.NumGoroutine()
 	resp, err := hc.Do(req)
 	if err != nil {
-		log.Printf("error do post request: %s\n", err)
+		log.Printf("ERROR: do post request: %s\n", err)
 	}
 
 	defer resp.Body.Close() // Close response body at end of function
@@ -127,13 +127,13 @@ func start(ctx context.Context, done chan<- struct{}, threadN int) {
 	start := make(chan struct{})
 
 	for i := 1; i < threadN+1; i++ {
-		log.Printf("Starting routine: %d\n", i)
+		log.Printf("INFO: Starting routine: %d\n", i)
 		go runner(ctx, start)
 	}
 
 	// Build initial request
 	func() {
-		log.Println("Building Initial Request")
+		log.Println("INFO: Building Initial Request")
 		result := make(chan *http.Request) // create channel result
 		go buildRequest(result)            // Building initial request
 		_ = <-result
@@ -148,7 +148,7 @@ func buildRequest(result chan<- *http.Request) {
 	// Building initial request and add values to request
 	req, err := http.NewRequest("POST", infoIntern.webaddress, strings.NewReader(infoIntern.formnames.Encode()))
 	if err != nil {
-		log.Println("error building request")
+		log.Println("ERROR: building request")
 	}
 
 	req.PostForm = infoIntern.formnames // add url.Values too request
@@ -182,7 +182,7 @@ func buildingDataAndCh(info *TargetInf) {
 func validateThreads(threads int, done chan<- struct{}) {
 	d := runtime.NumCPU()
 	if d < threads {
-		log.Printf("warning - more threads: %d than cores: %d\n", threads, d)
+		log.Printf("WARNING: more threads: %d than cores: %d\n", threads, d)
 		time.Sleep(3 * time.Second)
 	}
 	close(done)
