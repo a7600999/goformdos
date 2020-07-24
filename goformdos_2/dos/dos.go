@@ -5,11 +5,11 @@ package dos
 import (
 	"context"
 	"log"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -88,7 +88,7 @@ func makeRequest(done chan<- struct{}) {
 	go buildRequest(result) // Building our request
 	req := <-result         // Wait for our request
 
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r := runtime.NumGoroutine()
 	resp, err := hc.Do(req)
 	if err != nil {
 		log.Printf("error do post request: %s\n", err)
@@ -97,9 +97,9 @@ func makeRequest(done chan<- struct{}) {
 	defer resp.Body.Close() // Close response body at end of function
 
 	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
-		log.Printf("%10d | HTTP Status is in the 2xx range : %s\n", r.Uint32(), infoIntern.webaddress)
+		log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, infoIntern.webaddress)
 	} else {
-		log.Printf("%10d | Argh! Broken [%d] : %s\n", r.Uint32(), resp.StatusCode, infoIntern.webaddress)
+		log.Printf("\tRoutine: %6d | Argh! Broken [%d] | %s\n", r, resp.StatusCode, infoIntern.webaddress)
 	}
 
 	close(result) // Close request result channel
@@ -132,11 +132,14 @@ func start(ctx context.Context, done chan<- struct{}, threadN int) {
 	}
 
 	// Build initial request
-	log.Println("Building Initial Request")
-	result := make(chan *http.Request) // create channel done
-	go buildRequest(result)            // Building initial request
-	_ = <-result                       // Wait for initial request to be done                  // close channel done
-	close(result)
+	func() {
+		log.Println("Building Initial Request")
+		result := make(chan *http.Request) // create channel result
+		go buildRequest(result)            // Building initial request
+		_ = <-result
+		close(result) // Wait for initial request to be done
+	}()
+
 	close(start) // close channel starter to start runner routines
 	close(done)  // synchronise and unlock sync in parent function
 }
@@ -176,23 +179,42 @@ func buildingDataAndCh(info *TargetInf) {
 	}
 }
 
+func validateThreads(threads int, done chan<- struct{}) {
+	d := runtime.NumCPU()
+	if d < threads {
+		log.Printf("warning - more threads: %d than cores: %d\n", threads, d)
+		time.Sleep(3 * time.Second)
+	}
+	close(done)
+}
+
 // Dos - start Dos and returns error or nil
 func Dos(threads int, timeInSeconds int, info *TargetInf, done chan<- struct{}) {
 	dostime := time.Duration(timeInSeconds) * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), dostime)
 
-	// catch SIGINT (CTRL+C)
-	c := make(chan os.Signal)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := context.WithTimeout(context.Background(), dostime) // Intialize context with timeout
+	defer cancel()
+
+	// catch SIGINT (CTRL+C) and os.Interrupt
+	c := make(chan os.Signal, 1)
 	go func() {
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		<-c
-		log.Printf("\nyou pressed ctrl+c\n")
+		log.Printf("\nABORT: you pressed ctrl+c\n")
 		cancel()
+		/*
+			for sig := range c {
+				// sig is a ^C, handle it
+			}
+		*/
 	}()
 
 	buildingDataAndCh(info) // build the datastructure from TargetInf struct and initialize channels
-
 	sync := make(chan struct{})
+	go validateThreads(threads, sync)
+	<-sync
+
+	sync = make(chan struct{})
 	go start(ctx, sync, threads) // start routines
 	<-sync                       // wait for start routine
 
