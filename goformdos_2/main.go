@@ -115,12 +115,10 @@ func appendToStruct(mode string, done chan<- struct{}, input map[string]string) 
 }
 
 func main() {
+	forms := make(map[string]string)
+	headers := make(map[string]string)
 
-	var done = make(chan struct{})
-
-	var forms = make(map[string]string)
-	var headers = make(map[string]string)
-
+	done := make(chan struct{})
 	go validateURL(*flagURL, done)
 	go configparser.Parse(&forms, *flagForms, done)
 	go configparser.Parse(&headers, *flagHeaders, done)
@@ -130,8 +128,6 @@ func main() {
 		<-done
 	}
 
-	info.AddWebaddress(*flagURL) // add url to struct
-
 	go appendToStruct("FORMS", done, forms)     // Intialize forms
 	go appendToStruct("HEADERS", done, headers) // Intialize headers
 
@@ -140,8 +136,9 @@ func main() {
 		<-done
 	}
 
-	err := dos.Dos(*flagThreads, *flagTime, &info)
-	if err != nil {
-		log.Fatalln(err)
-	}
+	info.AddWebaddress(*flagURL) // add url to struct
+
+	sync := make(chan struct{})
+	go dos.Dos(*flagThreads, *flagTime, &info, sync)
+	<-sync
 }

