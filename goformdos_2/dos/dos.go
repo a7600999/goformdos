@@ -116,11 +116,14 @@ func runner(ctx context.Context, start <-chan struct{}) {
 		case <-ctx.Done(): // Quit routine on receive
 			return // Close runner goroutine
 		default:
-			func() {
-				done := make(chan struct{})
-				go makeRequest(done)
-				<-done
-			}()
+			done := make(chan struct{})
+			go makeRequest(done)
+			select {
+			case <-done:
+				continue
+			case <-time.After(1 * time.Second): // make sure that every second start a new request, still when the last not finish yet
+				continue
+			}
 		}
 	}
 }
@@ -189,7 +192,7 @@ func buildingData(info *TargetInf) {
 func validateThreads(threads int, done chan<- struct{}) {
 	d := runtime.NumCPU() // runtime.NumCPU() returns the number of available CPU Cores
 	if d < threads {
-		log.Printf("WARNING: more threads: %d than cores: %d\n", threads, d)
+		log.Printf("WARNING: more routines: %d than cores: %d\n", threads, d)
 		time.Sleep(3 * time.Second)
 	}
 	close(done)
