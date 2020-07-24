@@ -25,10 +25,10 @@ type TargetInf struct {
 }
 
 var (
-	infoIntern       TargetInf
-	authUser         string
-	authPass         string
-	persistenHeaders http.Header
+	infoIntern        TargetInf
+	authUser          string
+	authPass          string
+	persistentHeaders http.Header
 )
 
 // AddWebaddress - Add webaddress to TargetInf.webaddress
@@ -81,6 +81,7 @@ func (inf *TargetInf) Copy() TargetInf {
 	return *inf
 }
 
+// makeRequest - handle our complete request workflow. Build Clients and Requests
 func makeRequest(done chan<- struct{}) {
 	hc := http.Client{} // Initalize default client
 
@@ -106,6 +107,7 @@ func makeRequest(done chan<- struct{}) {
 	close(done)   // sending empty data to done channel
 }
 
+// runner - function with context that start makeRequest() and return on ctx.Done()
 func runner(ctx context.Context, start <-chan struct{}) {
 	<-start // Starting routine on close of channel starter
 
@@ -123,6 +125,7 @@ func runner(ctx context.Context, start <-chan struct{}) {
 	}
 }
 
+// start - starting N*runner() and building initial request
 func start(ctx context.Context, done chan<- struct{}, threadN int) {
 	start := make(chan struct{})
 
@@ -144,6 +147,7 @@ func start(ctx context.Context, done chan<- struct{}, threadN int) {
 	close(done)  // synchronise and unlock sync in parent function
 }
 
+// buildRequest - building request and copy forms and headers in a peristent state
 func buildRequest(result chan<- *http.Request) {
 	// Building initial request and add values to request
 	req, err := http.NewRequest("POST", infoIntern.webaddress, strings.NewReader(infoIntern.formnames.Encode()))
@@ -154,7 +158,7 @@ func buildRequest(result chan<- *http.Request) {
 	req.PostForm = infoIntern.formnames // add url.Values too request
 
 	// add headers and authorization (if set) to request and make it persistent
-	if persistenHeaders == nil {
+	if persistentHeaders == nil {
 		for key, value := range infoIntern.headers {
 			req.Header.Set(key, value)
 		}
@@ -163,24 +167,27 @@ func buildRequest(result chan<- *http.Request) {
 			tempVal := req.Header.Values("Authorization")[0]
 			req.Header.Set("Authorization", tempVal)
 		}
-		persistenHeaders = req.Header.Clone()
+		persistentHeaders = req.Header.Clone()
 	} else {
-		req.Header = persistenHeaders
+		req.Header = persistentHeaders
 	}
 	result <- req
 }
 
-func buildingDataAndCh(info *TargetInf) {
+// buildingData - do some initial work
+func buildingData(info *TargetInf) {
 	infoIntern = info.Copy() // Build global struct
 
+	// Set authUser and autPass from struct field-slice basicAuth
 	if infoIntern.authSet {
 		authUser = infoIntern.basicAuth[0]
 		authPass = infoIntern.basicAuth[1]
 	}
 }
 
+// validateThreads - warns if more threads starting as cpu cores available
 func validateThreads(threads int, done chan<- struct{}) {
-	d := runtime.NumCPU()
+	d := runtime.NumCPU() // runtime.NumCPU() returns the number of available CPU Cores
 	if d < threads {
 		log.Printf("WARNING: more threads: %d than cores: %d\n", threads, d)
 		time.Sleep(3 * time.Second)
@@ -209,7 +216,7 @@ func Dos(threads int, timeInSeconds int, info *TargetInf, done chan<- struct{}) 
 		*/
 	}()
 
-	buildingDataAndCh(info) // build the datastructure from TargetInf struct and initialize channels
+	buildingData(info) // build the datastructure from TargetInf struct and initialize channels
 	sync := make(chan struct{})
 	go validateThreads(threads, sync)
 	<-sync
@@ -218,6 +225,6 @@ func Dos(threads int, timeInSeconds int, info *TargetInf, done chan<- struct{}) 
 	go start(ctx, sync, threads) // start routines
 	<-sync                       // wait for start routine
 
-	<-ctx.Done() // wait for contex done
-	close(done)
+	<-ctx.Done() // wait for context done
+	close(done)  // close dos.Dos()
 }
