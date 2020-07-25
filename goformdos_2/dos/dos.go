@@ -132,18 +132,24 @@ func makeRequest(done chan<- struct{}, info *TargetInf) {
 	resp, err := hc.Do(req)
 	if err != nil {
 		log.Printf("ERROR: do post request: %s\n", err)
-	} else { // Catch request error e.g. "Connection reset by peer" or "socket: too many open files"
+	}
+
+	// Catch some errors e.g. "socket: too many open files" or "socket: connection reset by peer"
+	if resp != nil {
 		defer resp.Body.Close() // Close response body at end of function
-	}
 
-	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
-		log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, info.webaddress)
+		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, info.webaddress)
+		} else {
+			log.Printf("\tRoutine: %6d | Argh! Broken [%d] | %s\n", r, resp.StatusCode, info.webaddress)
+		}
+
+		close(result) // Close request result channel
+		close(done)   // sending empty data to done channel
 	} else {
-		log.Printf("\tRoutine: %6d | Argh! Broken [%d] | %s\n", r, resp.StatusCode, info.webaddress)
+		close(result) // Close request result channel
+		close(done)   // sending empty data to done channel
 	}
-
-	close(result) // Close request result channel
-	close(done)   // sending empty data to done channel
 }
 
 // runner - function with context that start makeRequest() and return on ctx.Done()
