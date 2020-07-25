@@ -131,7 +131,8 @@ func makeRequest(done chan<- struct{}, info *TargetInf) {
 	r := runtime.NumGoroutine()
 	resp, err := hc.Do(req)
 	if err != nil {
-		log.Printf("ERROR: do post request: %s\n", err)
+		//log.Printf("ERROR: do post request: %s\n", err)	// FOR DEBUG
+		log.Printf("\tRoutine: %6d |    CONNECTION DOWN (DIAL ERROR) | %s\n", r, info.webaddress)
 	}
 
 	// Catch some errors e.g. "socket: too many open files" or "socket: connection reset by peer"
@@ -141,7 +142,7 @@ func makeRequest(done chan<- struct{}, info *TargetInf) {
 		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
 			log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, info.webaddress)
 		} else {
-			log.Printf("\tRoutine: %6d |              Argh! Broken [%3d] | %s\n", r, resp.StatusCode, info.webaddress)
+			log.Printf("\tRoutine: %6d |   Argh! Online but Broken [%3d] | %s\n", r, resp.StatusCode, info.webaddress)
 		}
 
 		close(result) // Close request result channel
