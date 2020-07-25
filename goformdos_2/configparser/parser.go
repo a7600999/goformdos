@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 )
 
 /*
@@ -47,15 +48,15 @@ func AppendFileToStruct(mode string, filename string, sync chan<- string, info d
 // Parse - Parse the Config file to destination map[string]string
 // The config must be in the right format
 // e.g. Host:google.com
-func Parse(dest *map[string]string, filename string, done chan<- struct{}) {
+func Parse(dest *map[string]string, filename string, wg *sync.WaitGroup) {
 	f, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("error opening file: %s\n", filename)
+		log.Fatalf("ERROR: opening file: %s\n", filename)
 	}
 
 	defer func() {
 		if err = f.Close(); err != nil {
-			log.Fatalf("error closing file: %s\n", filename)
+			log.Fatalf("ERROR: closing file: %s\n", filename)
 		}
 	}()
 
@@ -76,5 +77,5 @@ func Parse(dest *map[string]string, filename string, done chan<- struct{}) {
 		log.Fatalf("%s\n", err)
 	}
 
-	done <- struct{}{}
+	wg.Done()
 }

