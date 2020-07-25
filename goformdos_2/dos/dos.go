@@ -141,7 +141,7 @@ func makeRequest(done chan<- struct{}, info *TargetInf) {
 		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
 			log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, info.webaddress)
 		} else {
-			log.Printf("\tRoutine: %6d | Argh! Broken [%d] | %s\n", r, resp.StatusCode, info.webaddress)
+			log.Printf("\tRoutine: %6d |              Argh! Broken [%3d] | %s\n", r, resp.StatusCode, info.webaddress)
 		}
 
 		close(result) // Close request result channel
