@@ -132,10 +132,7 @@ func makeRequest(done chan<- struct{}, info *TargetInf) {
 	resp, err := hc.Do(req)
 	if err != nil {
 		log.Printf("ERROR: do post request: %s\n", err)
-	}
-
-	// Catch request error e.g. "Connection reset by peer"
-	if resp.Body != nil {
+	} else { // Catch request error e.g. "Connection reset by peer" or "socket: too many open files"
 		defer resp.Body.Close() // Close response body at end of function
 	}
 
