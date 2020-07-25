@@ -4,6 +4,7 @@ package dos
 
 import (
 	"context"
+	"crypto/tls"
 	"log"
 	"net/http"
 	"net/url"
@@ -83,7 +84,16 @@ func (inf *TargetInf) Copy() TargetInf {
 
 // makeRequest - handle our complete request workflow. Build Clients and Requests
 func makeRequest(done chan<- struct{}) {
-	hc := http.Client{} // Initalize default client
+	// Set Transport states
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // skip tls verify for more speed
+		Proxy:           http.ProxyFromEnvironment,             // use proxies from environment variables
+	}
+
+	// Initialize Client
+	hc := &http.Client{
+		Transport: tr,
+	}
 
 	result := make(chan *http.Request)
 	go buildRequest(result) // Building our request
