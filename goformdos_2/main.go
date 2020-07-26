@@ -17,14 +17,18 @@ import (
 )
 
 var (
+	flagMode = flag.String(
+		"m",
+		"",
+		"Choose between POST and GET flood")
 	flagForms = flag.String(
-		"f",
+		"fp",
 		"",
-		"File containing form names")
+		"File containing form parameters")
 	flagHeaders = flag.String(
-		"h",
+		"hp",
 		"",
-		"File containing headers")
+		"File containing header parameters")
 	flagAuth = flag.String(
 		"a",
 		"",
@@ -51,12 +55,12 @@ var (
 func validateArgs() (err error) {
 	flag.Parse()
 
-	if *flagForms == "" || *flagURL == "" || *flagHeaders == "" || *flagThreads <= 0 || *flagTime <= 0 {
+	if *flagForms == "" || *flagURL == "" || *flagHeaders == "" || *flagMode == "" || *flagThreads <= 0 || *flagTime <= 0 {
 		err = fmt.Errorf("ERROR: please define arguments or use -h for help")
 		return err
 	}
 
-	// Validate URL
+	// Validate URL Func
 	validateURL := func(urladdr string) error {
 		_, err := url.ParseRequestURI(urladdr)
 		if err != nil {
@@ -65,12 +69,8 @@ func validateArgs() (err error) {
 		}
 		return nil
 	}
-	err = validateURL(*flagURL)
-	if err != nil {
-		return err
-	}
 
-	// validate filepath
+	// validate Filepath Func
 	validatePath := func(fp string) (bool, error) {
 		_, err := os.Stat(fp)
 		if err != nil {
@@ -79,17 +79,29 @@ func validateArgs() (err error) {
 		return true, err
 	}
 
-	// validate headerfile
+	// Validate URL
+	err = validateURL(*flagURL)
+	if err != nil {
+		return err
+	}
+
+	// validate headerfilepath
 	_, err = validatePath(*flagHeaders)
 	if err != nil {
 		err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagHeaders)
 		return err
 	}
 
-	// validate formfile
+	// validate formfilepath
 	_, err = validatePath(*flagForms)
 	if err != nil {
 		err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagForms)
+		return err
+	}
+
+	// validate MODE
+	if *flagMode != "GET" && *flagMode != "POST" {
+		err = fmt.Errorf("ERROR: the mode [%s] does not exist", *flagMode)
 		return err
 	}
 
@@ -126,7 +138,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	info := dos.New(*flagTime, *flagThreads, *flagURL) // Initialize new dos.TargetInf object
+	info := dos.New(*flagMode, *flagTime, *flagThreads, *flagURL) // Initialize new dos.TargetInf object
 
 	var wg sync.WaitGroup
 

