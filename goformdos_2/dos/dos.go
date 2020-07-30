@@ -70,11 +70,11 @@ func (inf *TargetInf) AddAuth(user string, password string) {
 // mode = FORMS (for forms)
 // mode = HEADERS (for headers)
 func (inf *TargetInf) AppendMore(mode string, input map[string]string, wg *sync.WaitGroup) {
-	for k, v := range input {
+	for key, value := range input {
 		if mode == "FORMS" {
-			inf.AddForm(k, v)
+			inf.AddForm(key, value)
 		} else if mode == "HEADERS" {
-			inf.AddHeader(k, v)
+			inf.AddHeader(key, value)
 		} else {
 			log.Fatalln("ERROR: in func appendToStruct - wrong mode! [FORMS / HEADERS]")
 		}
