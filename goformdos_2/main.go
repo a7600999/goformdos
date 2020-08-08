@@ -56,12 +56,8 @@ var (
 func validateArgs() (err error) {
 	flag.Parse()
 
-	if *flagForms == "" || *flagURL == "" || *flagHeaders == "" || *flagMode == "" || *flagThreads <= 0 || *flagTime <= 0 {
-		err = fmt.Errorf("ERROR: please define arguments or use -h for help")
-		return err
-	}
-
-	// Validate URL Func
+	// ## Begin anonyme functions ########################################
+	// validateUrl -- validate the given URL
 	validateURL := func(urladdr string) error {
 		_, err := url.ParseRequestURI(urladdr)
 		if err != nil {
@@ -71,7 +67,7 @@ func validateArgs() (err error) {
 		return nil
 	}
 
-	// validate Filepath Func
+	// validatePath -- validate filePath
 	validatePath := func(fp string) (bool, error) {
 		_, err := os.Stat(fp)
 		if err != nil {
@@ -79,8 +75,15 @@ func validateArgs() (err error) {
 		}
 		return true, err
 	}
+	// ## End anonyme functions ##########################################
 
-	// Validate URL
+	// check if the right flags are set
+	if *flagForms == "" || *flagURL == "" || *flagHeaders == "" || *flagMode == "" || *flagThreads <= 0 || *flagTime <= 0 {
+		err = fmt.Errorf("ERROR: please define arguments or use -h for help")
+		return err
+	}
+
+	// validate URL
 	err = validateURL(*flagURL)
 	if err != nil {
 		return err
@@ -106,23 +109,16 @@ func validateArgs() (err error) {
 		return err
 	}
 
+	// validate log output (logfile)
 	if *flagOutput != "" {
-		b, _ := validatePath(*flagOutput)
-		if b {
-			file, err := os.OpenFile(*flagOutput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-			if err != nil {
-				return err
-			}
-
-			defer file.Close()
-
-			log.SetOutput(file)
-		} else {
-			err = fmt.Errorf("ERROR: %s path not exist - unable to open or create file", *flagOutput)
+		_, err := validatePath(*flagOutput)
+		if err != nil {
+			err = fmt.Errorf("Error: %s not exists or ist not accesible", *flagOutput)
 			return err
 		}
 	}
 
+	// validate authorization
 	if *flagAuth != "" {
 		if !strings.Contains(*flagAuth, ":") {
 			err = fmt.Errorf("ERROR: %s is not a valid username:password", *flagAuth)
@@ -134,19 +130,42 @@ func validateArgs() (err error) {
 }
 
 func main() {
+	err := validateArgs() // validate arguments
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	// set-up logging
+	log.SetFlags(log.LstdFlags)
+	log.SetPrefix("goformdos\t")
+	if *flagOutput != "" {
+		f, err := os.OpenFile(*flagOutput, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Print(err)
+			os.Exit(1)
+		}
+		defer f.Close() // defer = LIFO
+
+		// Set up Logger
+		/*
+			iLog := log.New(f, "gocrypt-cli", log.LstdFlags)
+		*/
+
+		log.SetOutput(f) // set uputput logfile
+	}
+	log.Println("goformdos-------------------------------")
+
 	// get the start time of the program for later print out of execution time
 	start := time.Now()
 	// print the execution time at the end of main
 	defer func() {
-		fmt.Print("\033[H\033[2J") // clear terminal
+		//fmt.Print("\033[H\033[2J") // clear terminal
 		duration := time.Since(start)
-		log.Println("main.go: time took for execution:", duration)
+		log.Println("INFO: time took for execution:", duration)
+		log.Println("INFO: EXIT(0)")
+		log.Println("-------------------------------goformdos")
 	}()
-
-	err := validateArgs() // validate arguments
-	if err != nil {
-		log.Fatalln(err)
-	}
 
 	info := dos.New(*flagMode, *flagTime, *flagThreads, *flagURL) // Initialize new dos.TargetInf object
 
@@ -173,13 +192,13 @@ func main() {
 	wg.Wait()                                   // wait for goroutines to finish task
 
 	// Append Authorization (if set)
-	if *flagAuth != "" {
-		tempSlice := strings.Split(*flagAuth, ":")
-		info.AddAuth(tempSlice[0], tempSlice[1])
-		tempSlice = nil
-	}
-
-	fmt.Print("\033[H\033[2J") // clear terminal
+	func() {
+		if *flagAuth != "" {
+			tempSlice := strings.Split(*flagAuth, ":")
+			info.AddAuth(tempSlice[0], tempSlice[1])
+			tempSlice = nil
+		}
+	}()
 
 	// Starting the DOS function
 	wg = sync.WaitGroup{}

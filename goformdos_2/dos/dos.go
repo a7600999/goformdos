@@ -272,6 +272,7 @@ func buildRequest(result chan<- *http.Request, info *TargetInf) {
 	returnReq := func(req *http.Request) {
 		// add headers and authorization (if set) to request and make it persistent
 		if info.persistentHeaders == nil {
+			log.Println("INFO: Make Header and Authorization (if set) persistent") // log the build request
 			for key, value := range info.headers {
 				req.Header.Set(key, value)
 			}
