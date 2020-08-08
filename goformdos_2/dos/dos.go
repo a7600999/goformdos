@@ -19,6 +19,10 @@ import (
 	"time"
 )
 
+// Header charsets
+// const acceptCharset = "windows-1251,utf-8;q=0.7,*;q=0.7" // use it for runet
+const acceptCharset = "ISO-8859-1,utf-8;q=0.7,*;q=0.7"
+
 // TargetInf - struct for webaddress and formnames
 type TargetInf struct {
 	mode              string
@@ -285,10 +289,11 @@ func buildRequest(result chan<- *http.Request, info *TargetInf) {
 				req.Header.Set("Authorization", tempVal) // Set the base64 encoded authorization header
 			}
 
-			// overrride user preferences "Keep-Alive", "Connection" and "Cache-Control"
+			// overrride user preferences "Accept-Charset", Connection" and "Cache-Control"
 			func() {
-				log.Println("INFO: overrride user preferences Keep-Alive, Connection and Cache-Control")
-				req.Header.Set("Keep-Alive", strconv.Itoa(rand.Intn(10)+100))
+				log.Println("INFO: overrride user preferences Accept-Charset, Connection and Cache-Control")
+				log.Println("INFO: override Keep-Alive random on every new request")
+				req.Header.Set("Accept-Charset", acceptCharset)
 				req.Header.Set("Connection", "keep-alive")
 				req.Header.Set("Cache-Control", "no-cache")
 			}()
@@ -297,6 +302,10 @@ func buildRequest(result chan<- *http.Request, info *TargetInf) {
 
 		} else {
 			req.Header = info.persistentHeaders // reference persistent headers to request headers
+			// Change some header preferences on every single request. Override the persistent state of the keys
+			func() {
+				req.Header.Set("Keep-Alive", strconv.Itoa(rand.Intn(10)+100))
+			}()
 		}
 		result <- req // send request over channel back to ... (maybe calling function, or, wherever the channel waits)
 	}
