@@ -276,9 +276,9 @@ func buildRequest(result chan<- *http.Request, info *TargetInf) {
 				req.Header.Set(key, value)
 			}
 			if info.authSet {
-				req.SetBasicAuth(info.authUser, info.authPass)
+				req.SetBasicAuth(info.authUser, info.authPass) // base64 encode auth and set value to header
 				tempVal := req.Header.Values("Authorization")[0]
-				req.Header.Set("Authorization", tempVal)
+				req.Header.Set("Authorization", tempVal) // Set the base64 encoded authorization header
 			}
 			info.persistentHeaders = req.Header.Clone()
 		} else {
