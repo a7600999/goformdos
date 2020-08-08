@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -171,6 +172,7 @@ func syncedStart(ctx context.Context, info *TargetInf, done chan<- struct{}) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Println("INFO: Shutdown runner...")
 			return
 		default:
 			start := make(chan struct{})
@@ -229,12 +231,13 @@ func runner(ctx context.Context, start <-chan struct{}, info *TargetInf) {
 	for {
 		select {
 		case <-ctx.Done(): // Quit routine on receive
+			log.Println("INFO: Shutdown runner...")
 			return // Close runner goroutine
 		default:
 			done := make(chan struct{})
 			go makeRequest(done, info)
 			select {
-			case <-done: // Continue when the reset finish faster than 1sec (This will mostly not happen)
+			case <-done: // Continue when the reset finish faster than 1sec (This will mostly not happen, definitivly)
 				continue
 			case <-time.After(1 * time.Second): // make sure that every second start a new request, still when the last not finish yet
 				continue
@@ -247,6 +250,7 @@ func runner(ctx context.Context, start <-chan struct{}, info *TargetInf) {
 func start(ctx context.Context, info *TargetInf, done chan<- struct{}) {
 	start := make(chan struct{})
 
+	// starting as many routines as defined by user
 	for i := 1; i < info.threads+1; i++ {
 		log.Printf("INFO: Starting routine: %d\n", i)
 		go runner(ctx, start, info)
@@ -280,7 +284,17 @@ func buildRequest(result chan<- *http.Request, info *TargetInf) {
 				tempVal := req.Header.Values("Authorization")[0]
 				req.Header.Set("Authorization", tempVal) // Set the base64 encoded authorization header
 			}
-			info.persistentHeaders = req.Header.Clone()
+
+			// overrride user preferences "Keep-Alive", "Connection" and "Cache-Control"
+			func() {
+				log.Println("INFO: overrride user preferences Keep-Alive, Connection and Cache-Control")
+				req.Header.Set("Keep-Alive", strconv.Itoa(rand.Intn(10)+100))
+				req.Header.Set("Connection", "keep-alive")
+				req.Header.Set("Cache-Control", "no-cache")
+			}()
+
+			info.persistentHeaders = req.Header.Clone() // clone req.Header into info.persistenHeader
+
 		} else {
 			req.Header = info.persistentHeaders // reference persistent headers to request headers
 		}
@@ -336,9 +350,9 @@ func buildRequest(result chan<- *http.Request, info *TargetInf) {
 
 // validateThreads - warns if more threads starting as cpu cores available
 func validateThreads(info *TargetInf, done chan<- struct{}) {
-	d := runtime.NumCPU() // runtime.NumCPU() returns the number of available CPU Cores
-	if d < info.threads {
-		log.Printf("WARNING: more routines: %d than cores: %d\n", info.threads, d)
+	nCores := runtime.NumCPU() // runtime.NumCPU() returns the number of available CPU Cores
+	if nCores < info.threads {
+		log.Printf("WARNING: more routines: %d than cores: %d\n", info.threads, nCores)
 		time.Sleep(3 * time.Second)
 	}
 	close(done)
@@ -346,10 +360,19 @@ func validateThreads(info *TargetInf, done chan<- struct{}) {
 
 // Dos - start Dos and returns error or nil
 func (inf *TargetInf) Dos(wg *sync.WaitGroup) {
-	dostime := time.Duration(inf.duration) * time.Second
+	// Set up log
+	log.Printf("INFO: Starting DOS | Target: %s | Mode: %s | Duration: %d\n", inf.webaddress, inf.mode, inf.duration)
+	log.Println("INFO: Beginning Setup ...")
+
+	dostime := time.Duration(inf.duration) * time.Second // sum dostime
 
 	ctx, cancel := context.WithTimeout(context.Background(), dostime) // Intialize context with timeout
-	defer cancel()
+
+	// defer func
+	defer func() {
+		log.Println("Info: Exit DOS | Routines are now shutting down")
+		cancel()
+	}()
 
 	// catch SIGINT (CTRL+C) and os.Interrupt
 	c := make(chan os.Signal, 1)
@@ -357,6 +380,7 @@ func (inf *TargetInf) Dos(wg *sync.WaitGroup) {
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		<-c
 		log.Println("ABORT: you pressed ctrl+c")
+		log.Println("Info: Exit DOS | Routines are now shutting down")
 		cancel()
 		/*
 			for sig := range c {
@@ -365,14 +389,18 @@ func (inf *TargetInf) Dos(wg *sync.WaitGroup) {
 		*/
 	}()
 
+	// validate
 	sync := make(chan struct{})
-	go validateThreads(inf, sync)
-	<-sync
+	go validateThreads(inf, sync) // validate Threads
+	<-sync                        // wait for validateThreads
 
+	// start
 	sync = make(chan struct{})
 	go start(ctx, inf, sync) // start routines
 	<-sync                   // wait for start routine
 
 	<-ctx.Done() // wait for context done
 	wg.Done()
+
+	return // return to calling routine
 }

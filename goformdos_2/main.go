@@ -163,6 +163,7 @@ func main() {
 		log.SetOutput(f) // set uputput logfile
 	}
 	log.Println("goformdos-------------------------------")
+	log.Println("INFO: Goformdos 2.3 | Author: PiereLucas | License: MIT")
 
 	// get the start time of the program for later print out of execution time
 	start := time.Now()
