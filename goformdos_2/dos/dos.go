@@ -137,7 +137,7 @@ func syncedMakeRequest(start <-chan struct{}, info *TargetInf) {
 	resp, err := hc.Do(req)
 	if err != nil {
 		//log.Printf("ERROR: do post request: %s\n", err) // FOR DEBUG
-		log.Printf("\tRoutine: %6d |    CONNECTION DOWN (DIAL ERROR) | %s\n", r, req.URL)
+		log.Printf("\tRoutine: %6d |    CONNECTION DOWN (DIAL ERROR) | [%s] %s\n", r, info.mode, req.URL)
 
 		close(result) // Close request result channel
 
@@ -145,9 +145,9 @@ func syncedMakeRequest(start <-chan struct{}, info *TargetInf) {
 		defer resp.Body.Close() // Close response body at end of function
 
 		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
-			log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, req.URL)
+			log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | [%s] %s\n", r, info.mode, req.URL)
 		} else {
-			log.Printf("\tRoutine: %6d |   Argh! Online but Broken [%3d] | %s\n", r, resp.StatusCode, req.URL)
+			log.Printf("\tRoutine: %6d |   Argh! Online but Broken [%3d] | [%s] %s\n", r, resp.StatusCode, info.mode, req.URL)
 		}
 
 		close(result) // Close request result channel
@@ -204,7 +204,7 @@ func makeRequest(done chan<- struct{}, info *TargetInf) {
 	resp, err := hc.Do(req)
 	if err != nil {
 		//log.Printf("ERROR: do post request: %s\n", err) // FOR DEBUG
-		log.Printf("\tRoutine: %6d |    CONNECTION DOWN (DIAL ERROR) | %s\n", r, req.URL)
+		log.Printf("\tRoutine: %6d |    CONNECTION DOWN (DIAL ERROR) | [%s] %s\n", r, info.mode, req.URL)
 
 		close(result) // Close request result channel
 		close(done)   // sending empty data to done channel
@@ -212,9 +212,9 @@ func makeRequest(done chan<- struct{}, info *TargetInf) {
 		defer resp.Body.Close() // Close response body at end of function
 
 		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
-			log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | %s\n", r, req.URL)
+			log.Printf("\tRoutine: %6d | HTTP Status is in the 2xx range | [%s] %s\n", r, info.mode, req.URL)
 		} else {
-			log.Printf("\tRoutine: %6d |   Argh! Online but Broken [%3d] | %s\n", r, resp.StatusCode, req.URL)
+			log.Printf("\tRoutine: %6d |   Argh! Online but Broken [%3d] | [%s] %s\n", r, resp.StatusCode, info.mode, req.URL)
 		}
 
 		close(result) // Close request result channel
@@ -356,7 +356,7 @@ func (inf *TargetInf) Dos(wg *sync.WaitGroup) {
 	go func() {
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		<-c
-		log.Printf("\nABORT: you pressed ctrl+c\n")
+		log.Println("ABORT: you pressed ctrl+c")
 		cancel()
 		/*
 			for sig := range c {

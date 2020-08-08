@@ -25,7 +25,7 @@ var (
 	flagForms = flag.String(
 		"fp",
 		"",
-		"File containing form parameters")
+		"File containing form parameters [Only needed for POST mode]")
 	flagHeaders = flag.String(
 		"hp",
 		"",
@@ -77,9 +77,21 @@ func validateArgs() (err error) {
 	}
 	// ## End anonyme functions ##########################################
 
-	// check if the right flags are set
-	if *flagForms == "" || *flagURL == "" || *flagHeaders == "" || *flagMode == "" || *flagThreads <= 0 || *flagTime <= 0 {
+	// check if the general flags are set
+	if *flagURL == "" || *flagHeaders == "" || *flagMode == "" || *flagThreads <= 0 || *flagTime <= 0 {
 		err = fmt.Errorf("ERROR: please define arguments or use -h for help")
+		return err
+	}
+
+	// validate flagMode
+	if *flagMode != "GET" && *flagMode != "POST" {
+		err = fmt.Errorf("ERROR: the mode [%s] does not exist", *flagMode)
+		return err
+	}
+
+	// check if forms set
+	if *flagForms == "" && *flagMode == "POST" {
+		err = fmt.Errorf("ERROR: POST mode is set without a form file")
 		return err
 	}
 
@@ -97,16 +109,12 @@ func validateArgs() (err error) {
 	}
 
 	// validate formfilepath
-	_, err = validatePath(*flagForms)
-	if err != nil {
-		err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagForms)
-		return err
-	}
-
-	// validate MODE
-	if *flagMode != "GET" && *flagMode != "POST" {
-		err = fmt.Errorf("ERROR: the mode [%s] does not exist", *flagMode)
-		return err
+	if *flagMode == "POST" {
+		_, err = validatePath(*flagForms)
+		if err != nil {
+			err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagForms)
+			return err
+		}
 	}
 
 	// validate log output (logfile)
@@ -171,25 +179,45 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	// maps to parse in and temporary store our forms and headers
-	var (
-		forms   = make(map[string]string)
-		headers = make(map[string]string)
-	)
+	if *flagMode == "GET" {
+		// maps to parse in and temporary store our headers
+		var (
+			headers = make(map[string]string)
+		)
 
-	// Parse forms and headers from file
-	wg = sync.WaitGroup{}
-	wg.Add(2)
-	go configparser.Parse(&forms, *flagForms, &wg)
-	go configparser.Parse(&headers, *flagHeaders, &wg)
-	wg.Wait()
+		// Parse headers from file
+		wg = sync.WaitGroup{}
+		wg.Add(1)
+		go configparser.Parse(&headers, *flagHeaders, &wg)
+		wg.Wait()
 
-	// Append forms and headers to dos.TargetInf and his underlaying structure's
-	wg = sync.WaitGroup{}
-	wg.Add(2)
-	go info.AppendMore("FORMS", forms, &wg)     // Intialize forms
-	go info.AppendMore("HEADERS", headers, &wg) // Intialize headers
-	wg.Wait()                                   // wait for goroutines to finish task
+		// Append headers to dos.TargetInf and his underlaying structure's
+		wg = sync.WaitGroup{}
+		wg.Add(1)
+		go info.AppendMore("HEADERS", headers, &wg) // Intialize headers
+		wg.Wait()
+
+	} else if *flagMode == "POST" {
+		// maps to parse in and temporary store our forms and headers
+		var (
+			forms   = make(map[string]string)
+			headers = make(map[string]string)
+		)
+
+		// Parse forms and headers from file
+		wg = sync.WaitGroup{}
+		wg.Add(2)
+		go configparser.Parse(&forms, *flagForms, &wg)
+		go configparser.Parse(&headers, *flagHeaders, &wg)
+		wg.Wait()
+
+		// Append forms and headers to dos.TargetInf and his underlaying structure's
+		wg = sync.WaitGroup{}
+		wg.Add(2)
+		go info.AppendMore("FORMS", forms, &wg)     // Intialize forms
+		go info.AppendMore("HEADERS", headers, &wg) // Intialize headers
+		wg.Wait()                                   // wait for goroutines to finish task
+	}
 
 	// Append Authorization (if set)
 	func() {
