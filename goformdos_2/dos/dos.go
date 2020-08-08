@@ -19,10 +19,6 @@ import (
 	"time"
 )
 
-// Header charsets
-// const acceptCharset = "windows-1251,utf-8;q=0.7,*;q=0.7" // use it for runet
-const acceptCharset = "ISO-8859-1,utf-8;q=0.7,*;q=0.7"
-
 // TargetInf - struct for webaddress and formnames
 type TargetInf struct {
 	mode              string
@@ -292,7 +288,7 @@ func buildRequest(result chan<- *http.Request, info *TargetInf) {
 			// overrride user preferences "Accept-Charset", Connection" and "Cache-Control"
 			func() {
 				log.Println("INFO: overrride user preferences Accept-Charset, Connection and Cache-Control")
-				log.Println("INFO: override Keep-Alive random on every new request")
+				log.Println("INFO: override Keep-Alive, Referer and User-Agent random on every new request")
 				req.Header.Set("Accept-Charset", acceptCharset)
 				req.Header.Set("Connection", "keep-alive")
 				req.Header.Set("Cache-Control", "no-cache")
@@ -301,22 +297,15 @@ func buildRequest(result chan<- *http.Request, info *TargetInf) {
 			info.persistentHeaders = req.Header.Clone() // clone req.Header into info.persistenHeader
 
 		} else {
-			req.Header = info.persistentHeaders // reference persistent headers to request headers
+			req.Header = info.persistentHeaders.Clone() // clone persistent headers to request headers
 			// Change some header preferences on every single request. Override the persistent state of the keys
 			func() {
 				req.Header.Set("Keep-Alive", strconv.Itoa(rand.Intn(10)+100))
+				req.Header.Set("Referer", headersReferers[rand.Intn(len(headersReferers))]+buildblock(rand.Intn(5)+5))
+				req.Header.Set("User-Agent", headersUseragents[rand.Intn(len(headersUseragents))])
 			}()
 		}
 		result <- req // send request over channel back to ... (maybe calling function, or, wherever the channel waits)
-	}
-
-	// random block function
-	buildblock := func(size int) string {
-		var block []rune
-		for i := 0; i < size; i++ {
-			block = append(block, rune(rand.Intn(25)+65))
-		}
-		return string(block)
 	}
 
 	// Building Request GET or POST mode available
@@ -355,6 +344,15 @@ func buildRequest(result chan<- *http.Request, info *TargetInf) {
 	} else {
 		log.Fatalln("ERROR: buildingRequest() unrecognized MODE")
 	}
+}
+
+// random block function
+func buildblock(size int) string {
+	var block []rune
+	for i := 0; i < size; i++ {
+		block = append(block, rune(rand.Intn(25)+65))
+	}
+	return string(block)
 }
 
 // validateThreads - warns if more threads starting as cpu cores available
