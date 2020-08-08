@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pierelucas/goformdos/goformdos2/dos"
 
@@ -133,6 +134,15 @@ func validateArgs() (err error) {
 }
 
 func main() {
+	// get the start time of the program for later print out of execution time
+	start := time.Now()
+	// print the execution time at the end of main
+	defer func() {
+		fmt.Print("\033[H\033[2J") // clear terminal
+		duration := time.Since(start)
+		log.Println("main.go: time took for execution:", duration)
+	}()
+
 	err := validateArgs() // validate arguments
 	if err != nil {
 		log.Fatalln(err)
@@ -171,8 +181,11 @@ func main() {
 
 	fmt.Print("\033[H\033[2J") // clear terminal
 
+	// Starting the DOS function
 	wg = sync.WaitGroup{}
 	wg.Add(1)
 	go info.Dos(&wg)
 	wg.Wait()
+
+	return
 }
