@@ -52,9 +52,9 @@ var (
 		"output logfile (lot of Foo)")
 )
 
-// init()
+// validate command line user arguments
 func validateArgs() (err error) {
-	flag.Parse()
+	flag.Parse() // Parse Flags
 
 	// ## Begin anonyme functions ########################################
 	// validateUrl -- validate the given URL
@@ -89,9 +89,35 @@ func validateArgs() (err error) {
 		return err
 	}
 
-	// check if forms set
-	if *flagForms == "" && *flagMode == "POST" {
-		err = fmt.Errorf("ERROR: POST mode is set without a form file")
+	// validate and correct flagMode grammar
+	// we use this too don't bind the user on UPPERCASE input
+	err = func() error {
+		if strings.EqualFold("GET", *flagMode) {
+			*flagMode = "GET"
+		} else if strings.EqualFold("POST", *flagMode) {
+			*flagMode = "POST"
+		} else {
+			err = fmt.Errorf("ERROR: the mode [%s] does not exist", *flagMode)
+			return err
+		}
+
+		// check if forms set
+		if *flagForms == "" && strings.EqualFold("POST", *flagMode) {
+			err = fmt.Errorf("ERROR: POST mode is set without a form file")
+			return err
+		}
+
+		// validate formFilePath
+		if strings.EqualFold("POST", *flagMode) {
+			_, err = validatePath(*flagForms)
+			if err != nil {
+				err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagForms)
+				return err
+			}
+		}
+		return nil
+	}()
+	if err != nil {
 		return err
 	}
 
@@ -106,15 +132,6 @@ func validateArgs() (err error) {
 	if err != nil {
 		err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagHeaders)
 		return err
-	}
-
-	// validate formfilepath
-	if *flagMode == "POST" {
-		_, err = validatePath(*flagForms)
-		if err != nil {
-			err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagForms)
-			return err
-		}
 	}
 
 	// validate log output (logfile)
@@ -137,12 +154,16 @@ func validateArgs() (err error) {
 	return nil // Everything seems to be okay :)
 }
 
-func main() {
-	err := validateArgs() // validate arguments
+func checkError(err error) {
 	if err != nil {
-		fmt.Println(err)
+		fmt.Print(err)
 		os.Exit(1)
 	}
+}
+
+func main() {
+	err := validateArgs() // validate arguments
+	checkError(err)
 
 	// set-up logging
 	log.SetFlags(log.LstdFlags)
