@@ -70,14 +70,24 @@ func (inf *TargetInf) AddAuth(user string, password string) {
 // mode = FORMS (for forms)
 // mode = HEADERS (for headers)
 func (inf *TargetInf) AppendMore(mode string, input map[string]interface{}, wg *sync.WaitGroup) {
-	for key, value := range input {
-		if mode == "FORMS" {
-			inf.AddForm(key, value.(string))
-		} else if mode == "HEADERS" {
-			inf.AddHeader(key, value.(string))
-		} else {
-			log.Fatalln("ERROR: in func appendToStruct - wrong mode! [FORMS / HEADERS]")
+	if mode == "FORMS" {
+		if inf.formnames == nil {
+			_ = inf.MakeForms()
 		}
+
+		for key, value := range input {
+			inf.AddForm(key, value.(string))
+		}
+	} else if mode == "HEADERS" {
+		if inf.headers == nil {
+			_ = inf.MakeHeaders()
+		}
+
+		for key, value := range input {
+			inf.AddHeader(key, value.(string))
+		}
+	} else {
+		log.Fatalf("ERROR: AppendMore - wrong mode %s", mode)
 	}
 
 	wg.Done()
@@ -107,8 +117,6 @@ func (inf *TargetInf) Copy() TargetInf {
 func New(m string, d int, t int, addr string) *TargetInf {
 	return &TargetInf{
 		mode:       m,
-		formnames:  url.Values{},
-		headers:    make(map[string]string),
 		threads:    t,
 		duration:   d,
 		webaddress: addr,

@@ -45,7 +45,7 @@ func ParseConfig(dest *map[string]string, filename string, wg *sync.WaitGroup) {
 	wg.Done()
 }
 
-// ParseJSON --
+// ParseJSON -- Parse unstructured JSON file.
 func ParseJSON(dest *map[string]interface{}, filename string, wg *sync.WaitGroup) {
 	fileData, err := ioutil.ReadFile(filename)
 	if err != nil {
