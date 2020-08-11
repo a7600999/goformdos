@@ -12,9 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pierelucas/goformdos/goformdos2/dos"
-
 	"github.com/pierelucas/goformdos/goformdos2/configparser"
+	"github.com/pierelucas/goformdos/goformdos2/dos/l7"
 )
 
 var (
@@ -78,14 +77,13 @@ func validateArgs() (err error) {
 	// ## End anonyme functions ##########################################
 
 	// check if the general flags are set
-	if *flagURL == "" || *flagHeaders == "" || *flagMode == "" || *flagThreads <= 0 || *flagTime <= 0 {
+	if *flagURL == "" || *flagMode == "" || *flagThreads <= 0 || *flagTime <= 0 {
 		err = fmt.Errorf("ERROR: please define arguments or use -h for help")
 		return err
 	}
 
 	// validate and correct flagMode grammar
-	// we use this too don't bind the user on UPPERCASE input
-	err = func() error {
+	if err = func() error {
 		if strings.EqualFold("GET", *flagMode) {
 			*flagMode = "GET"
 		} else if strings.EqualFold("POST", *flagMode) {
@@ -94,10 +92,26 @@ func validateArgs() (err error) {
 			err = fmt.Errorf("ERROR: the mode [%s] does not exist", *flagMode)
 			return err
 		}
+		return nil
+	}(); err != nil {
+		return err
+	}
 
-		// check if forms set
+	// validate URL
+	if err = validateURL(*flagURL); err != nil {
+		return err
+	}
+
+	// validate formfilepath
+	if err = func() error {
+		// check if forms set with GET or not set with POST
 		if *flagForms == "" && strings.EqualFold("POST", *flagMode) {
 			err = fmt.Errorf("ERROR: POST mode is set without a form file")
+			return err
+		}
+
+		if *flagForms != "" && strings.EqualFold("GET", *flagMode) {
+			err = fmt.Errorf("ERROR: GET mode doesn't need a formfile")
 			return err
 		}
 
@@ -110,28 +124,21 @@ func validateArgs() (err error) {
 			}
 		}
 		return nil
-	}()
-	if err != nil {
-		return err
-	}
-
-	// validate URL
-	err = validateURL(*flagURL)
-	if err != nil {
+	}(); err != nil {
 		return err
 	}
 
 	// validate headerfilepath
-	_, err = validatePath(*flagHeaders)
-	if err != nil {
-		err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagHeaders)
-		return err
+	if *flagHeaders != "" {
+		if _, err = validatePath(*flagHeaders); err != nil {
+			err = fmt.Errorf("ERROR: %s not exist or is not accesible", *flagHeaders)
+			return err
+		}
 	}
 
 	// validate log output (logfile)
 	if *flagOutput != "" {
-		_, err := validatePath(*flagOutput)
-		if err != nil {
+		if _, err := validatePath(*flagOutput); err != nil {
 			err = fmt.Errorf("Error: %s not exists or ist not accesible", *flagOutput)
 			return err
 		}
@@ -191,15 +198,16 @@ func main() {
 		log.Println("-------------------------------goformdos")
 	}()
 
-	info := dos.New(*flagMode, *flagTime, *flagThreads, *flagURL) // Initialize new dos.TargetInf object
+	layer7 := l7.New(*flagMode, *flagTime, *flagThreads, *flagURL) // Initialize new layer7.Layer7 object
 
 	var wg sync.WaitGroup
 
-	if *flagMode == "GET" {
-		// maps to parse in and temporary store our headers
-		var (
-			headers = make(map[string]interface{})
-		)
+	if *flagMode == "GET" && *flagHeaders != "" { // check if headerfile is set
+		// logging
+		log.Printf("INFO: Load Headerfile %s", *flagHeaders)
+
+		// allocate memory
+		var headers = make(map[string]interface{})
 
 		// Parse headers from file
 		wg = sync.WaitGroup{}
@@ -210,36 +218,59 @@ func main() {
 		// Append headers to dos.TargetInf and his underlaying structure's
 		wg = sync.WaitGroup{}
 		wg.Add(1)
-		go info.AppendMore("HEADERS", headers, &wg) // Intialize headers
+		go layer7.AppendJSON("HEADERS", headers, &wg) // Intialize headers
 		wg.Wait()
 
 	} else if *flagMode == "POST" {
-		// maps to parse in and temporary store our forms and headers
-		var (
-			forms   = make(map[string]interface{})
-			headers = make(map[string]interface{})
-		)
+		// check if headerfile is set
+		if *flagHeaders != "" {
+			// logging
+			log.Printf("INFO: Load Headerfile %s", *flagHeaders)
+			log.Printf("INFO: Load Formfile %s", *flagForms)
 
-		// Parse forms and headers from file
-		wg = sync.WaitGroup{}
-		wg.Add(2)
-		go configparser.ParseJSON(&forms, *flagForms, &wg)
-		go configparser.ParseJSON(&headers, *flagHeaders, &wg)
-		wg.Wait()
+			// allocate memory
+			var forms = make(map[string]interface{})
+			var headers = make(map[string]interface{})
 
-		// Append forms and headers to dos.TargetInf and his underlaying structure's
-		wg = sync.WaitGroup{}
-		wg.Add(2)
-		go info.AppendMore("FORMS", forms, &wg)     // Intialize forms
-		go info.AppendMore("HEADERS", headers, &wg) // Intialize headers
-		wg.Wait()                                   // wait for goroutines to finish task
+			// Parse forms and headers from file
+			wg = sync.WaitGroup{}
+			wg.Add(2)
+			go configparser.ParseJSON(&forms, *flagForms, &wg)
+			go configparser.ParseJSON(&headers, *flagHeaders, &wg)
+			wg.Wait()
+
+			// Append forms and headers to dos.TargetInf and his underlaying structure's
+			wg = sync.WaitGroup{}
+			wg.Add(2)
+			go layer7.AppendJSON("FORMS", forms, &wg)     // Intialize forms
+			go layer7.AppendJSON("HEADERS", headers, &wg) // Intialize headers
+			wg.Wait()
+		} else {
+			//logging
+			log.Printf("INFO: Load Formfile %s", *flagForms)
+
+			// allocate memory
+			var forms = make(map[string]interface{})
+
+			// Parse forms and headers from file
+			wg = sync.WaitGroup{}
+			wg.Add(1)
+			go configparser.ParseJSON(&forms, *flagForms, &wg)
+			wg.Wait()
+
+			// Append forms and headers to dos.TargetInf and his underlaying structure's
+			wg = sync.WaitGroup{}
+			wg.Add(1)
+			go layer7.AppendJSON("FORMS", forms, &wg) // Intialize forms
+			wg.Wait()
+		}
 	}
 
 	// Append Authorization (if set)
 	func() {
 		if *flagAuth != "" {
 			tempSlice := strings.Split(*flagAuth, ":")
-			info.AddAuth(tempSlice[0], tempSlice[1])
+			layer7.AddAuth(tempSlice[0], tempSlice[1])
 			tempSlice = nil
 		}
 	}()
@@ -247,7 +278,7 @@ func main() {
 	// Starting the DOS function
 	wg = sync.WaitGroup{}
 	wg.Add(1)
-	go info.Dos(&wg)
+	go layer7.Dos(&wg)
 	wg.Wait()
 
 	return
