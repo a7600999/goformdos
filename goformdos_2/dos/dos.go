@@ -69,12 +69,12 @@ func (inf *TargetInf) AddAuth(user string, password string) {
 // makes use of internal functions TargetInf.AddForm and TargetInf.AddHeader
 // mode = FORMS (for forms)
 // mode = HEADERS (for headers)
-func (inf *TargetInf) AppendMore(mode string, input map[string]string, wg *sync.WaitGroup) {
+func (inf *TargetInf) AppendMore(mode string, input map[string]interface{}, wg *sync.WaitGroup) {
 	for key, value := range input {
 		if mode == "FORMS" {
-			inf.AddForm(key, value)
+			inf.AddForm(key, value.(string))
 		} else if mode == "HEADERS" {
-			inf.AddHeader(key, value)
+			inf.AddHeader(key, value.(string))
 		} else {
 			log.Fatalln("ERROR: in func appendToStruct - wrong mode! [FORMS / HEADERS]")
 		}
@@ -99,7 +99,7 @@ func (inf *TargetInf) MakeHeaders() map[string]string {
 
 // Copy - Copy the TargetInf Struct
 func (inf *TargetInf) Copy() TargetInf {
-	return *inf // De-reference pointer (return-by-value)
+	return *inf // unReference pointer (return-by-value)
 }
 
 // New - Initialize new DoS

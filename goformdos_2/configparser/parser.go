@@ -2,16 +2,18 @@ package configparser
 
 import (
 	"bufio"
+	"encoding/json"
+	"io/ioutil"
 	"log"
 	"os"
 	"strings"
 	"sync"
 )
 
-// Parse - Parse the Config file to destination map[string]string
+// ParseConfig - Parse the Config file to destination map[string]string
 // The config must be in the right format
 // e.g. Host:google.com
-func Parse(dest *map[string]string, filename string, wg *sync.WaitGroup) {
+func ParseConfig(dest *map[string]string, filename string, wg *sync.WaitGroup) {
 	f, err := os.Open(filename)
 	if err != nil {
 		log.Fatalf("ERROR: opening file: %s\n", filename)
@@ -38,6 +40,21 @@ func Parse(dest *map[string]string, filename string, wg *sync.WaitGroup) {
 
 	if err = s.Err(); err != nil {
 		log.Fatalf("%s\n", err)
+	}
+
+	wg.Done()
+}
+
+// ParseJSON --
+func ParseJSON(dest *map[string]interface{}, filename string, wg *sync.WaitGroup) {
+	fileData, err := ioutil.ReadFile(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = json.Unmarshal(fileData, &dest)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	wg.Done()

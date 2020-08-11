@@ -83,12 +83,6 @@ func validateArgs() (err error) {
 		return err
 	}
 
-	// validate flagMode
-	if *flagMode != "GET" && *flagMode != "POST" {
-		err = fmt.Errorf("ERROR: the mode [%s] does not exist", *flagMode)
-		return err
-	}
-
 	// validate and correct flagMode grammar
 	// we use this too don't bind the user on UPPERCASE input
 	err = func() error {
@@ -204,13 +198,13 @@ func main() {
 	if *flagMode == "GET" {
 		// maps to parse in and temporary store our headers
 		var (
-			headers = make(map[string]string)
+			headers = make(map[string]interface{})
 		)
 
 		// Parse headers from file
 		wg = sync.WaitGroup{}
 		wg.Add(1)
-		go configparser.Parse(&headers, *flagHeaders, &wg)
+		go configparser.ParseJSON(&headers, *flagHeaders, &wg)
 		wg.Wait()
 
 		// Append headers to dos.TargetInf and his underlaying structure's
@@ -222,15 +216,15 @@ func main() {
 	} else if *flagMode == "POST" {
 		// maps to parse in and temporary store our forms and headers
 		var (
-			forms   = make(map[string]string)
-			headers = make(map[string]string)
+			forms   = make(map[string]interface{})
+			headers = make(map[string]interface{})
 		)
 
 		// Parse forms and headers from file
 		wg = sync.WaitGroup{}
 		wg.Add(2)
-		go configparser.Parse(&forms, *flagForms, &wg)
-		go configparser.Parse(&headers, *flagHeaders, &wg)
+		go configparser.ParseJSON(&forms, *flagForms, &wg)
+		go configparser.ParseJSON(&headers, *flagHeaders, &wg)
 		wg.Wait()
 
 		// Append forms and headers to dos.TargetInf and his underlaying structure's
