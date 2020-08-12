@@ -18,7 +18,7 @@ import (
 type Layer7 struct {
 	mode              string
 	threads           int
-	duration          int
+	duration          time.Duration
 	webaddress        string
 	formnames         url.Values
 	headers           map[string]string
@@ -67,7 +67,7 @@ func (inf *Layer7) AddAuth(user string, password string) {
 func (inf *Layer7) AppendJSON(mode string, input map[string]interface{}, wg *sync.WaitGroup) {
 	if mode == "FORMS" {
 		if inf.formnames == nil {
-			_ = inf.MakeForms()
+			_ = inf.MakeForms() // allocate memory
 		}
 
 		for key, value := range input {
@@ -75,7 +75,7 @@ func (inf *Layer7) AppendJSON(mode string, input map[string]interface{}, wg *syn
 		}
 	} else if mode == "HEADERS" {
 		if inf.headers == nil {
-			_ = inf.MakeHeaders()
+			_ = inf.MakeHeaders() // allocate memory
 		}
 
 		for key, value := range input {
@@ -108,25 +108,24 @@ func (inf *Layer7) Copy() Layer7 {
 }
 
 // New - Initialize new DoS
-// m = mode, dur = duration, thr = threads, addr = webaddress
-func New(m string, d int, t int, addr string) *Layer7 {
+// m = mode, duration = duration in seconds, threads = threads, addr = webaddress
+func New(mode, addr string, threads, duration int) *Layer7 {
+	dtime := time.Duration(duration) * time.Second // sum duration
 	return &Layer7{
-		mode:       m,
-		threads:    t,
-		duration:   d,
+		mode:       mode,
+		threads:    threads,
+		duration:   dtime,
 		webaddress: addr,
 	}
 }
 
-// Dos - start Dos and returns error or nil
-func (inf *Layer7) Dos(wg *sync.WaitGroup) {
+// StartDos - start Dos and returns error or nil
+func (inf *Layer7) StartDos(wg *sync.WaitGroup) {
 	// Set up log
 	log.Printf("INFO: Starting DOS | Target: %s | Mode: %s | Duration: %d\n", inf.webaddress, inf.mode, inf.duration)
 	log.Println("INFO: Beginning Setup ...")
 
-	dostime := time.Duration(inf.duration) * time.Second // sum dostime
-
-	ctx, cancel := context.WithTimeout(context.Background(), dostime) // Intialize context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), inf.duration) // Intialize context with timeout
 
 	// defer func
 	defer func() {

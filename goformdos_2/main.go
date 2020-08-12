@@ -278,7 +278,7 @@ func main() {
 	// Starting the DOS function
 	wg = sync.WaitGroup{}
 	wg.Add(1)
-	go layer7.Dos(&wg)
+	go layer7.StartDos(&wg)
 	wg.Wait()
 
 	return
